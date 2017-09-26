@@ -75,10 +75,9 @@ namespace SEEW.Grids {
 			grid = Entity as IMyCubeGrid;
 
 			logger = new Logger(grid.CustomName, "RadarSupervisor");
-			logger.debugLog("Radar supervisor created for grid", "Init");
 
 			// Add hooks
-			Entity.NeedsUpdate |= VRage.ModAPI.MyEntityUpdateEnum.EACH_100TH_FRAME;
+			Entity.NeedsUpdate |= VRage.ModAPI.MyEntityUpdateEnum.EACH_10TH_FRAME;
 			grid.OnBlockAdded += BlockAdded;
 			grid.OnBlockRemoved += BlockRemoved;
 		}
@@ -92,7 +91,7 @@ namespace SEEW.Grids {
 		#endregion
 
 		#region SE Hooks - Simulation
-		public override void UpdateBeforeSimulation100() {
+		public override void UpdateBeforeSimulation10() {
 			// Only sweep if the ship has radars
 			if(allRadars.Count > 0)
 				DoSweep();
@@ -116,7 +115,8 @@ namespace SEEW.Grids {
 				};
 				allRadars.Add(radar);
 
-				logger.debugLog("New radar block faces sector " + radar.sector, "BlockAdded");
+				logger.debugLog("New radar block faces sector " + radar.sector, 
+					"BlockAdded");
 
 				RecalculateSectorCoverage();
 			}
@@ -145,7 +145,8 @@ namespace SEEW.Grids {
 					allRadars.Remove(found);
 					logger.debugLog("Phased radar block removed", "BlockRemoved");
 				} else {
-					logger.log(Logger.severity.ERROR, "BlockRemoved", "Phased radar block removed but was not found in list.");
+					logger.log(Logger.severity.ERROR, "BlockRemoved", 
+						"Phased radar block removed but was not found in list.");
 				}
 
 				RecalculateSectorCoverage();
@@ -169,22 +170,33 @@ namespace SEEW.Grids {
 				t.Value.lost = true;
 			}
 
-			VRageMath.BoundingSphereD sphere =
-				new VRageMath.BoundingSphereD(grid.GetPosition(), 10000);
-			List<IMyEntity> ents =
-				MyAPIGateway.Entities.GetEntitiesInSphere(ref sphere);
+			// Find all entities within the range
+			// TODO: Make range configurable via antenna properties
+			VRageMath.BoundingSphereD sphere 
+				= new VRageMath.BoundingSphereD(grid.GetPosition(), 10000);
+			List<IMyEntity> ents 
+				= MyAPIGateway.Entities.GetEntitiesInSphere(ref sphere);
 
 			foreach (IMyEntity e in ents) {
 				if (e == grid)
 					continue;
 
-				if (e is IMyCubeGrid) { 
-					// Fuck you KSH
-					/*Sandbox.Game.Gui.MyHud.LocationMarkers.RegisterMarker(
-					 *	e.EntityId, new VRage.Game.Gui.MyHudEntityParams() {
-							FlagsEnum = VRage.Game.Gui.MyHudIndicatorFlagsEnum.SHOW_ALL,
-							Text = new StringBuilder("Test Icon")
-					});*/
+				// Radar will only pick up grids
+				if (e is IMyCubeGrid) {
+					// Transform the coordinates into grid space so we
+					// can compare it against our radar coverage
+					VRageMath.Vector3D relative 
+						= VRageMath.Vector3D.Transform(
+							e.GetPosition(), grid.WorldMatrixNormalizedInv);
+					//logger.debugLog("Contact has grid-space vector " + relative.ToString(), "DoSweep");
+
+					Sector sec = SectorExtensions.ClassifyVector(relative);
+					//logger.debugLog("Contact is in sector " + sec, "DoSweep");
+
+					//Check that the sector is covered by our radars
+					// If it isn't, skip this contact.  It will be pruned below
+					if (IsSectorBlind(sec))
+						continue;
 
 					// Check if this contact is already in the tracks dictionary
 					Track oldTrack = null;
@@ -244,18 +256,22 @@ namespace SEEW.Grids {
 		/// <returns></returns>
 		private bool IsBlockRadar(IMySlimBlock block) {
 			return block.FatBlock != null &&
-				block.FatBlock.BlockDefinition.SubtypeId.StartsWith("EWPhasedRadar");
+				block.FatBlock.BlockDefinition.SubtypeId.StartsWith(
+					"EWPhasedRadar");
 		}
 
 		private Sector DetermineAntennaSector(IMySlimBlock antenna) {
 			// Start with the default direction
 			// The model antenna points in the +X, +Y, and -Z directions
-			VRageMath.Vector3D direction = new VRageMath.Vector3D(1.0f, 1.0f, -1.0f);
+			VRageMath.Vector3D direction 
+				= new VRageMath.Vector3D(1.0f, 1.0f, -1.0f);
 
 			// Rotate this vector by the orientation of the block
-			VRageMath.Vector3D rotated = VRageMath.Vector3D.Rotate(direction, antenna.FatBlock.LocalMatrix);
+			VRageMath.Vector3D rotated = VRageMath.Vector3D.Rotate(
+				direction, antenna.FatBlock.LocalMatrix);
 
-			logger.debugLog("New radar's vector is " + rotated.ToString(), "DetermineAntennaSector");
+			logger.debugLog("New radar's vector is " + rotated.ToString(), 
+				"DetermineAntennaSector");
 
 			return SectorExtensions.ClassifyVector(rotated);
 		}
@@ -272,7 +288,18 @@ namespace SEEW.Grids {
 				radarCoverage |= r.sector;
 			}
 
-			logger.debugLog($"Recomputed sector coverage of {allRadars.Count} radars to be " + String.Format("0x{0:X}", radarCoverage), "RecalculateSectorCoverage");
+			logger.debugLog(
+				$"Recomputed sector coverage of {allRadars.Count} radars to be " 
+				+ String.Format("0x{0:X}", radarCoverage), 
+				"RecalculateSectorCoverage");
+		}
+
+		private bool IsSectorCovered(Sector s) {
+			return (radarCoverage & s) != 0;
+		}
+
+		private bool IsSectorBlind(Sector s) {
+			return (radarCoverage & s) == 0;
 		}
 		#endregion
 	}

@@ -9,6 +9,7 @@ namespace SEEW.Records {
 	/// <summary>
 	/// Refers to an octant around a grid
 	/// </summary>
+	[Flags]
 	public enum Sector {
 		NONE = 0,
 		TOP_FRONT_RIGHT = 1,
