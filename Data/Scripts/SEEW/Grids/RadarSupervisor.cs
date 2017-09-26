@@ -19,6 +19,7 @@ using Sandbox.Game.Entities;
 using VRage.ModAPI;
 
 using SEEW.Records;
+using Sandbox.Game.World;
 
 namespace SEEW.Grids {
 
@@ -34,7 +35,8 @@ namespace SEEW.Grids {
 		/// Represents a radar block on the ship
 		/// </summary>
 		private class RadarBlock {
-			public IMySlimBlock block;
+			public IMyRadioAntenna block;
+			public Sector sector;
 		}
 
 		/// <summary>
@@ -55,7 +57,7 @@ namespace SEEW.Grids {
 		
 		private List<RadarBlock> allRadars = new List<RadarBlock>();
 		private Dictionary<long, Track> allTracks = new Dictionary<long, Track>();
-		private Octant radarCoverage = 0;
+		private Sector radarCoverage = Sector.NONE;
 
 		#endregion
 
@@ -73,12 +75,10 @@ namespace SEEW.Grids {
 			grid = Entity as IMyCubeGrid;
 
 			logger = new Logger(grid.CustomName, "RadarSupervisor");
-
-			Entity.NeedsUpdate |= VRage.ModAPI.MyEntityUpdateEnum.EACH_100TH_FRAME;
-
 			logger.debugLog("Radar supervisor created for grid", "Init");
 
 			// Add hooks
+			Entity.NeedsUpdate |= VRage.ModAPI.MyEntityUpdateEnum.EACH_100TH_FRAME;
 			grid.OnBlockAdded += BlockAdded;
 			grid.OnBlockRemoved += BlockRemoved;
 		}
@@ -109,9 +109,14 @@ namespace SEEW.Grids {
 		private void BlockAdded(IMySlimBlock added) {
 			if (IsBlockRadar(added)) {
 				logger.debugLog("New phased radar block added", "BlockAdded");
-				allRadars.Add(new RadarBlock() {
-					block = added
-				});
+
+				RadarBlock radar = new RadarBlock() {
+					block = added as IMyRadioAntenna,
+					sector = DetermineAntennaSector(added)
+				};
+				allRadars.Add(radar);
+
+				logger.debugLog("New radar block faces sector " + radar.sector, "BlockAdded");
 
 				RecalculateSectorCoverage();
 			}
@@ -125,13 +130,22 @@ namespace SEEW.Grids {
 		/// </summary>
 		/// <param name="removed"></param>
 		private void BlockRemoved(IMySlimBlock removed) {
+
+			// TODO: Figure out why these blocks are never being found
 			if(IsBlockRadar(removed)) {
-				logger.debugLog("Phased radar block removed", "BlockRemoved");
+				RadarBlock found = null;
 				foreach(RadarBlock r in allRadars) {
-					if(r.block == removed) {
-						allRadars.Remove(r);
+					if(r.block == removed.FatBlock) {
+						found = r;
 						break;
 					}
+				}
+
+				if(found != null) {
+					allRadars.Remove(found);
+					logger.debugLog("Phased radar block removed", "BlockRemoved");
+				} else {
+					logger.log(Logger.severity.ERROR, "BlockRemoved", "Phased radar block removed but was not found in list.");
 				}
 
 				RecalculateSectorCoverage();
@@ -144,7 +158,7 @@ namespace SEEW.Grids {
 		/// Runs a radar sweep for the attached grid.
 		/// </summary>
 		private void DoSweep() {
-			logger.debugLog("Beginning sweep", "UpdateBeforeSimulation100");
+			//logger.debugLog("Beginning sweep", "UpdateBeforeSimulation100");
 
 			// new, maintained, lost
 			int n = 0, m = 0, l = 0;
@@ -160,18 +174,16 @@ namespace SEEW.Grids {
 			List<IMyEntity> ents =
 				MyAPIGateway.Entities.GetEntitiesInSphere(ref sphere);
 
-			//string output = "Detected the following grids: ";
 			foreach (IMyEntity e in ents) {
 				if (e == grid)
 					continue;
 
-				if (e is IMyCubeGrid) {
-					//output += (e as IMyCubeGrid).CustomName + ", ";
-
+				if (e is IMyCubeGrid) { 
 					// Fuck you KSH
-					/*Sandbox.Game.Gui.MyHud.LocationMarkers.RegisterMarker(e.EntityId, new VRage.Game.Gui.MyHudEntityParams() {
-						FlagsEnum = VRage.Game.Gui.MyHudIndicatorFlagsEnum.SHOW_ALL,
-						Text = new StringBuilder("Test Icon")
+					/*Sandbox.Game.Gui.MyHud.LocationMarkers.RegisterMarker(
+					 *	e.EntityId, new VRage.Game.Gui.MyHudEntityParams() {
+							FlagsEnum = VRage.Game.Gui.MyHudIndicatorFlagsEnum.SHOW_ALL,
+							Text = new StringBuilder("Test Icon")
 					});*/
 
 					// Check if this contact is already in the tracks dictionary
@@ -185,19 +197,22 @@ namespace SEEW.Grids {
 						Track newTrack = new Track() {
 							lost = false,
 							ent = e,
-							gps = MyAPIGateway.Session.GPS.Create("Track " + e.EntityId.ToString(), "", e.GetPosition(), true, true)
+							gps = MyAPIGateway.Session.GPS.Create(
+								"~Track " + e.EntityId.ToString(), "~", 
+								e.GetPosition(), true, true)
 						};
 
 						MyAPIGateway.Session.GPS.AddLocalGps(newTrack.gps);
 
+						MyVisualScriptLogicProvider.SetGPSColor(
+							newTrack.gps.Name, 
+							Constants.Color_RadarContact);
+
 						allTracks.Add(e.EntityId, newTrack);
 					}
-
-					
 					
 				}
 			}
-			//logger.debugLog(output, "UpdateBeforeSimulation100");
 
 			// Check which tracks were not marked valid during this sweep
 			// and prune them
@@ -216,7 +231,8 @@ namespace SEEW.Grids {
 				allTracks.Remove(r);
 			}
 
-			logger.debugLog($"Track Summary: {n} new, {m} maintained, {l} lost", "DoSweep");
+			//logger.debugLog(
+				//$"Track Summary: {n} new, {m} maintained, {l} lost", "DoSweep");
 		}
 		#endregion
 
@@ -231,12 +247,32 @@ namespace SEEW.Grids {
 				block.FatBlock.BlockDefinition.SubtypeId.StartsWith("EWPhasedRadar");
 		}
 
+		private Sector DetermineAntennaSector(IMySlimBlock antenna) {
+			// Start with the default direction
+			// The model antenna points in the +X, +Y, and -Z directions
+			VRageMath.Vector3D direction = new VRageMath.Vector3D(1.0f, 1.0f, -1.0f);
+
+			// Rotate this vector by the orientation of the block
+			VRageMath.Vector3D rotated = VRageMath.Vector3D.Rotate(direction, antenna.FatBlock.LocalMatrix);
+
+			logger.debugLog("New radar's vector is " + rotated.ToString(), "DetermineAntennaSector");
+
+			return SectorExtensions.ClassifyVector(rotated);
+		}
+
 		/// <summary>
 		/// Runs through the list of radars on this grid and determines
 		/// which sectors have coverage
 		/// </summary>
 		private void RecalculateSectorCoverage() {
+			// Reset coverage to zero
+			radarCoverage = Sector.NONE;
 
+			foreach(RadarBlock r in allRadars) {
+				radarCoverage |= r.sector;
+			}
+
+			logger.debugLog($"Recomputed sector coverage of {allRadars.Count} radars to be " + String.Format("0x{0:X}", radarCoverage), "RecalculateSectorCoverage");
 		}
 		#endregion
 	}
