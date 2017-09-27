@@ -84,6 +84,7 @@ namespace SEEW.Grids {
 			Entity.NeedsUpdate |= VRage.ModAPI.MyEntityUpdateEnum.EACH_10TH_FRAME;
 			grid.OnBlockAdded += BlockAdded;
 			grid.OnBlockRemoved += BlockRemoved;
+			
 		}
 
 		public override void Close() {
@@ -119,6 +120,8 @@ namespace SEEW.Grids {
 				};
 				allRadars.Add(radar);
 
+				radar.block.FatBlock.IsWorkingChanged += WorkingChanged;
+
 				logger.debugLog("New radar block faces sector " + radar.sector, 
 					"BlockAdded");
 
@@ -146,6 +149,7 @@ namespace SEEW.Grids {
 				}
 
 				if(found != null) {
+					found.block.FatBlock.IsWorkingChanged -= WorkingChanged;
 					allRadars.Remove(found);
 					logger.debugLog("Radar block removed", "BlockRemoved");
 				} else {
@@ -153,6 +157,15 @@ namespace SEEW.Grids {
 						"Radar block removed but was not found in list.");
 				}
 
+				RecalculateSectorCoverage();
+			}
+		}
+		#endregion
+
+		#region SE Hooks - Working Changed
+		private void WorkingChanged(IMyCubeBlock block) {
+			if (IsBlockRadar(block.SlimBlock)) {
+				logger.debugLog("A radar's IsWorking has changed.", "WorkingChanged");
 				RecalculateSectorCoverage();
 			}
 		}
@@ -289,7 +302,8 @@ namespace SEEW.Grids {
 			radarCoverage = Sector.NONE;
 
 			foreach(RadarBlock r in allRadars) {
-				radarCoverage |= r.sector;
+				if(r.block.FatBlock.IsWorking)
+					radarCoverage |= r.sector;
 			}
 
 			logger.debugLog(
