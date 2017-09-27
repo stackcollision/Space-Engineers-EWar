@@ -35,8 +35,12 @@ namespace SEEW.Grids {
 		/// Represents a radar block on the ship
 		/// </summary>
 		private class RadarBlock {
-			public IMyRadioAntenna block;
+			public IMySlimBlock block;
 			public Sector sector;
+
+			public IMyRadioAntenna antenna {
+				get { return block as IMyRadioAntenna; }
+			}
 		}
 
 		/// <summary>
@@ -107,10 +111,10 @@ namespace SEEW.Grids {
 		/// <param name="added"></param>
 		private void BlockAdded(IMySlimBlock added) {
 			if (IsBlockRadar(added)) {
-				logger.debugLog("New phased radar block added", "BlockAdded");
+				logger.debugLog("New radar block added", "BlockAdded");
 
 				RadarBlock radar = new RadarBlock() {
-					block = added as IMyRadioAntenna,
+					block = added,
 					sector = DetermineAntennaSector(added)
 				};
 				allRadars.Add(radar);
@@ -135,7 +139,7 @@ namespace SEEW.Grids {
 			if(IsBlockRadar(removed)) {
 				RadarBlock found = null;
 				foreach(RadarBlock r in allRadars) {
-					if(r.block == removed.FatBlock) {
+					if(r.block == removed) {
 						found = r;
 						break;
 					}
@@ -143,10 +147,10 @@ namespace SEEW.Grids {
 
 				if(found != null) {
 					allRadars.Remove(found);
-					logger.debugLog("Phased radar block removed", "BlockRemoved");
+					logger.debugLog("Radar block removed", "BlockRemoved");
 				} else {
 					logger.log(Logger.severity.ERROR, "BlockRemoved", 
-						"Phased radar block removed but was not found in list.");
+						"Radar block removed but was not found in list.");
 				}
 
 				RecalculateSectorCoverage();
