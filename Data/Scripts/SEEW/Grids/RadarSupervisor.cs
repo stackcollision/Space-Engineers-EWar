@@ -62,6 +62,7 @@ namespace SEEW.Grids {
 		private List<RadarBlock> allRadars = new List<RadarBlock>();
 		private Dictionary<long, Track> allTracks = new Dictionary<long, Track>();
 		private Sector radarCoverage = Sector.NONE;
+		private float radarRange = 0;
 
 		#endregion
 
@@ -163,6 +164,11 @@ namespace SEEW.Grids {
 		#endregion
 
 		#region SE Hooks - Working Changed
+		/// <summary>
+		/// Hook for when a block's working status changes.  I.e. it loses power,
+		/// is damaged, or is turned off.
+		/// </summary>
+		/// <param name="block"></param>
 		private void WorkingChanged(IMyCubeBlock block) {
 			if (IsBlockRadar(block.SlimBlock)) {
 				logger.debugLog("A radar's IsWorking has changed.", "WorkingChanged");
@@ -178,6 +184,8 @@ namespace SEEW.Grids {
 		private void DoSweep() {
 			//logger.debugLog("Beginning sweep", "UpdateBeforeSimulation100");
 
+			RecalculateRadarRange();
+
 			// new, maintained, lost
 			int n = 0, m = 0, l = 0;
 
@@ -190,7 +198,7 @@ namespace SEEW.Grids {
 			// Find all entities within the range
 			// TODO: Make range configurable via antenna properties
 			VRageMath.BoundingSphereD sphere 
-				= new VRageMath.BoundingSphereD(grid.GetPosition(), 10000);
+				= new VRageMath.BoundingSphereD(grid.GetPosition(), radarRange);
 			List<IMyEntity> ents 
 				= MyAPIGateway.Entities.GetEntitiesInSphere(ref sphere);
 
@@ -277,6 +285,11 @@ namespace SEEW.Grids {
 					"EWPhasedRadar");
 		}
 
+		/// <summary>
+		/// Determines which sector the emitting face of a radar is pointing at
+		/// </summary>
+		/// <param name="antenna"></param>
+		/// <returns></returns>
 		private Sector DetermineAntennaSector(IMySlimBlock antenna) {
 			// Start with the default direction
 			// The model antenna points in the +X, +Y, and -Z directions
@@ -300,22 +313,50 @@ namespace SEEW.Grids {
 		private void RecalculateSectorCoverage() {
 			// Reset coverage to zero
 			radarCoverage = Sector.NONE;
+			radarRange = 0;
 
 			foreach(RadarBlock r in allRadars) {
 				if(r.block.FatBlock.IsWorking)
 					radarCoverage |= r.sector;
+
+				radarRange = Math.Max(radarRange,
+					(r.block.FatBlock as IMyRadioAntenna).Radius);
 			}
 
 			logger.debugLog(
 				$"Recomputed sector coverage of {allRadars.Count} radars to be " 
-				+ String.Format("0x{0:X}", radarCoverage), 
+				+ String.Format("0x{0:X}", radarCoverage) + " with range " 
+				+ radarRange, 
 				"RecalculateSectorCoverage");
 		}
 
+		/// <summary>
+		/// Sets the overall radar range to the greatest setting of all
+		/// the attached radar blocks
+		/// </summary>
+		private void RecalculateRadarRange() {
+			radarRange = 0;
+
+			foreach (RadarBlock r in allRadars) {
+				radarRange = Math.Max(radarRange,
+					(r.block.FatBlock as IMyRadioAntenna).Radius);
+			}
+		}
+
+		/// <summary>
+		/// Returns true if a sector is covered by the attached radars
+		/// </summary>
+		/// <param name="s"></param>
+		/// <returns></returns>
 		private bool IsSectorCovered(Sector s) {
 			return (radarCoverage & s) != 0;
 		}
 
+		/// <summary>
+		/// Returns true if the sector has no radar covering it
+		/// </summary>
+		/// <param name="s"></param>
+		/// <returns></returns>
 		private bool IsSectorBlind(Sector s) {
 			return (radarCoverage & s) == 0;
 		}
