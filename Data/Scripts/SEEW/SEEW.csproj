@@ -103,6 +103,7 @@
     <Compile Include="Blocks\PhasedRadar.cs" />
     <Compile Include="Constants.cs" />
     <Compile Include="Core\CoreComponent.cs" />
+    <Compile Include="EWMath.cs" />
     <Compile Include="Grids\Player.cs" />
     <Compile Include="Grids\RadarSupervisor.cs" />
     <Compile Include="Logger.cs" />

@@ -20,6 +20,7 @@ using VRage.ModAPI;
 
 using SEEW.Records;
 using Sandbox.Game.World;
+using VRageMath;
 
 namespace SEEW.Grids {
 
@@ -50,7 +51,12 @@ namespace SEEW.Grids {
 			public bool lost;
 			public IMyEntity ent;
 			public IMyGps gps;
+			public string trackId;
 		}
+		#endregion
+
+		#region Constants
+		private const double radarBeamWidth = 0.005;
 		#endregion
 
 		#region Instance Members
@@ -82,7 +88,7 @@ namespace SEEW.Grids {
 			logger = new Logger(grid.CustomName, "RadarSupervisor");
 
 			// Add hooks
-			Entity.NeedsUpdate |= VRage.ModAPI.MyEntityUpdateEnum.EACH_10TH_FRAME;
+			Entity.NeedsUpdate |= VRage.ModAPI.MyEntityUpdateEnum.EACH_100TH_FRAME;
 			grid.OnBlockAdded += BlockAdded;
 			grid.OnBlockRemoved += BlockRemoved;
 			
@@ -97,7 +103,7 @@ namespace SEEW.Grids {
 		#endregion
 
 		#region SE Hooks - Simulation
-		public override void UpdateBeforeSimulation10() {
+		public override void UpdateBeforeSimulation100() {
 			// Only sweep if the ship has radars
 			if(allRadars.Count > 0)
 				DoSweep();
@@ -223,20 +229,42 @@ namespace SEEW.Grids {
 					if (IsSectorBlind(sec))
 						continue;
 
+					// Check that the contact is large enough for us to see
+					// Do this by comparing the radar cross-section to the
+					// minimum cross-section the radar is capable of seeing at
+					// this range
+					Vector3D vecTo = e.GetPosition() - grid.GetPosition();
+					double xsec 
+						= EWMath.DetermineXSection(e as IMyCubeGrid, vecTo);
+					double range = vecTo.Length();
+					double minxsec
+						= EWMath.MinimumXSection(radarBeamWidth, range);
+					//logger.debugLog($"Minimum xsec at range {range} is {minxsec}", "DoSweep");
+					logger.debugLog($"Contact xsec is {xsec} and minimum is {minxsec}", "DoSweep");
+					if (xsec < minxsec)
+						continue;
+
 					// Check if this contact is already in the tracks dictionary
 					Track oldTrack = null;
 					if(allTracks.TryGetValue(e.EntityId, out oldTrack)) {
 						m++;
 						oldTrack.gps.Coords = e.GetPosition();
+						oldTrack.gps.Name 
+							= $"~Track {oldTrack.trackId} ({(int)xsec}m²)~";
 						oldTrack.lost = false;
 					} else {
 						n++;
+
+						string id = e.EntityId.ToString();
+						id = id.Substring(Math.Max(0, id.Length - 5));
+
 						Track newTrack = new Track() {
 							lost = false,
 							ent = e,
 							gps = MyAPIGateway.Session.GPS.Create(
-								"~Track " + e.EntityId.ToString(), "~", 
-								e.GetPosition(), true, true)
+								$"~Track {id} ({(int)xsec}m²)~", "Radar Track",
+								e.GetPosition(), true, true),
+							trackId = id
 						};
 
 						MyAPIGateway.Session.GPS.AddLocalGps(newTrack.gps);
