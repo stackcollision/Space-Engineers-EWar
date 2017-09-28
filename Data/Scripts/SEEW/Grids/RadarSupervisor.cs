@@ -55,10 +55,6 @@ namespace SEEW.Grids {
 		}
 		#endregion
 
-		#region Constants
-		private const double radarBeamWidth = 0.005;
-		#endregion
-
 		#region Instance Members
 
 		private Logger logger = null;
@@ -88,7 +84,7 @@ namespace SEEW.Grids {
 			logger = new Logger(grid.CustomName, "RadarSupervisor");
 
 			// Add hooks
-			Entity.NeedsUpdate |= VRage.ModAPI.MyEntityUpdateEnum.EACH_100TH_FRAME;
+			Entity.NeedsUpdate |= VRage.ModAPI.MyEntityUpdateEnum.EACH_10TH_FRAME;
 			grid.OnBlockAdded += BlockAdded;
 			grid.OnBlockRemoved += BlockRemoved;
 			
@@ -103,7 +99,7 @@ namespace SEEW.Grids {
 		#endregion
 
 		#region SE Hooks - Simulation
-		public override void UpdateBeforeSimulation100() {
+		public override void UpdateBeforeSimulation10() {
 			// Only sweep if the ship has radars
 			if(allRadars.Count > 0)
 				DoSweep();
@@ -192,6 +188,8 @@ namespace SEEW.Grids {
 
 			RecalculateRadarRange();
 
+			Vector3D position = grid.GetPosition();
+
 			// new, maintained, lost
 			int n = 0, m = 0, l = 0;
 
@@ -204,7 +202,7 @@ namespace SEEW.Grids {
 			// Find all entities within the range
 			// TODO: Make range configurable via antenna properties
 			VRageMath.BoundingSphereD sphere 
-				= new VRageMath.BoundingSphereD(grid.GetPosition(), radarRange);
+				= new VRageMath.BoundingSphereD(position, radarRange);
 			List<IMyEntity> ents 
 				= MyAPIGateway.Entities.GetEntitiesInSphere(ref sphere);
 
@@ -214,11 +212,13 @@ namespace SEEW.Grids {
 
 				// Radar will only pick up grids
 				if (e is IMyCubeGrid) {
+					Vector3D epos = e.WorldAABB.Center;
+
 					// Transform the coordinates into grid space so we
 					// can compare it against our radar coverage
 					VRageMath.Vector3D relative 
 						= VRageMath.Vector3D.Transform(
-							e.GetPosition(), grid.WorldMatrixNormalizedInv);
+							epos, grid.WorldMatrixNormalizedInv);
 					//logger.debugLog("Contact has grid-space vector " + relative.ToString(), "DoSweep");
 
 					Sector sec = SectorExtensions.ClassifyVector(relative);
@@ -233,22 +233,39 @@ namespace SEEW.Grids {
 					// Do this by comparing the radar cross-section to the
 					// minimum cross-section the radar is capable of seeing at
 					// this range
-					Vector3D vecTo = e.GetPosition() - grid.GetPosition();
+					Vector3D vecTo = epos - position;
 					double xsec 
 						= EWMath.DetermineXSection(e as IMyCubeGrid, vecTo);
 					double range = vecTo.Length();
 					double minxsec
-						= EWMath.MinimumXSection(radarBeamWidth, range);
+						= EWMath.MinimumXSection(Constants.radarBeamWidth, range);
 					//logger.debugLog($"Minimum xsec at range {range} is {minxsec}", "DoSweep");
-					logger.debugLog($"Contact xsec is {xsec} and minimum is {minxsec}", "DoSweep");
+					//logger.debugLog($"Contact xsec is {xsec} and minimum is {minxsec}", "DoSweep");
 					if (xsec < minxsec)
 						continue;
+
+					// Check if there is something between the radar
+					// and the contact
+					vecTo.Normalize();
+					Vector3D castPosition = position + (vecTo * grid.LocalAABB.Size *1.2);
+					// TODO: CastRay inefficient over long distances
+					//if (range <= 100) {
+						IHitInfo hit;
+						if (MyAPIGateway.Physics.CastRay(castPosition, epos, out hit)) {
+							if (hit.HitEntity != e) {
+								//logger.debugLog($"Contact {e.EntityId} obscured by {hit.HitEntity.EntityId}", "DoSweep");
+								continue;
+							}
+						}
+					/*} else {
+
+					}*/
 
 					// Check if this contact is already in the tracks dictionary
 					Track oldTrack = null;
 					if(allTracks.TryGetValue(e.EntityId, out oldTrack)) {
 						m++;
-						oldTrack.gps.Coords = e.GetPosition();
+						oldTrack.gps.Coords = epos;
 						oldTrack.gps.Name 
 							= $"~Track {oldTrack.trackId} ({(int)xsec}m²)~";
 						oldTrack.lost = false;
@@ -263,7 +280,7 @@ namespace SEEW.Grids {
 							ent = e,
 							gps = MyAPIGateway.Session.GPS.Create(
 								$"~Track {id} ({(int)xsec}m²)~", "Radar Track",
-								e.GetPosition(), true, true),
+								epos, true, true),
 							trackId = id
 						};
 
