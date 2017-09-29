@@ -29,7 +29,8 @@ namespace SEEW.Core {
 
 		public override void UpdateBeforeSimulation() {
 			// Initialize on the first frame with Session is not null
-			if(!initialized) {
+			if(!initialized)
+				{
 				if(MyAPIGateway.Session != null) {
 					// Hook into the UI terminal controls so we can remove antenna
 					// controls we don't like from the radar
@@ -78,7 +79,7 @@ namespace SEEW.Core {
 				*/
 
 				// TODO: Figure out a less fragile way to do this
-				List<IMyTerminalControl> savedControls = new List<IMyTerminalControl>(controls);
+				/*List<IMyTerminalControl> savedControls = new List<IMyTerminalControl>(controls);
 				controls.Clear();
 
 				controls.Add(savedControls[0]);
@@ -89,6 +90,7 @@ namespace SEEW.Core {
 				controls.Add(savedControls[5]);
 				controls.Add(savedControls[6]);
 				controls.Add(savedControls[9]);
+				controls.Add(savedControls[10]);*/
 
 				// TODO: Change the title of the range slider
 				//(savedControls[9] as IMyTerminalControlSlider).Title.

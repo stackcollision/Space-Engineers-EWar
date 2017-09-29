@@ -19,8 +19,10 @@ using Sandbox.Game.Entities;
 using VRage.ModAPI;
 
 using SEEW.Records;
+using SEEW.Core;
 using Sandbox.Game.World;
 using VRageMath;
+using Sandbox.Common.ObjectBuilders;
 
 namespace SEEW.Grids {
 
@@ -32,18 +34,6 @@ namespace SEEW.Grids {
 	class RadarSupervisor : MyGameLogicComponent {
 
 		#region Structs and Enums
-		/// <summary>
-		/// Represents a radar block on the ship
-		/// </summary>
-		private class RadarBlock {
-			public IMySlimBlock block;
-			public Sector sector;
-
-			public IMyRadioAntenna antenna {
-				get { return block as IMyRadioAntenna; }
-			}
-		}
-
 		/// <summary>
 		/// One contact that the ship's radar system is tracking.
 		/// </summary>
@@ -60,11 +50,10 @@ namespace SEEW.Grids {
 		private Logger logger = null;
 
 		private IMyCubeGrid grid = null;
+
+		private RadarSystem shortRange;
 		
-		private List<RadarBlock> allRadars = new List<RadarBlock>();
 		private Dictionary<long, Track> allTracks = new Dictionary<long, Track>();
-		private Sector radarCoverage = Sector.NONE;
-		private float radarRange = 0;
 
 		#endregion
 
@@ -83,8 +72,10 @@ namespace SEEW.Grids {
 
 			logger = new Logger(grid.CustomName, "RadarSupervisor");
 
+			shortRange = new RadarSystem(grid);
+
 			// Add hooks
-			Entity.NeedsUpdate |= VRage.ModAPI.MyEntityUpdateEnum.EACH_10TH_FRAME;
+			Entity.NeedsUpdate |= VRage.ModAPI.MyEntityUpdateEnum.EACH_100TH_FRAME;
 			grid.OnBlockAdded += BlockAdded;
 			grid.OnBlockRemoved += BlockRemoved;
 			
@@ -99,9 +90,8 @@ namespace SEEW.Grids {
 		#endregion
 
 		#region SE Hooks - Simulation
-		public override void UpdateBeforeSimulation10() {
-			// Only sweep if the ship has radars
-			if(allRadars.Count > 0)
+		public override void UpdateBeforeSimulation100() {
+			if(shortRange.HasRadars())
 				DoSweep();
 		}
 		#endregion
@@ -115,20 +105,7 @@ namespace SEEW.Grids {
 		/// <param name="added"></param>
 		private void BlockAdded(IMySlimBlock added) {
 			if (IsBlockRadar(added)) {
-				logger.debugLog("New radar block added", "BlockAdded");
-
-				RadarBlock radar = new RadarBlock() {
-					block = added,
-					sector = DetermineAntennaSector(added)
-				};
-				allRadars.Add(radar);
-
-				radar.block.FatBlock.IsWorkingChanged += WorkingChanged;
-
-				logger.debugLog("New radar block faces sector " + radar.sector, 
-					"BlockAdded");
-
-				RecalculateSectorCoverage();
+				shortRange.AddRadar(added);
 			}
 		}
 		#endregion
@@ -140,41 +117,8 @@ namespace SEEW.Grids {
 		/// </summary>
 		/// <param name="removed"></param>
 		private void BlockRemoved(IMySlimBlock removed) {
-
-			// TODO: Figure out why these blocks are never being found
 			if(IsBlockRadar(removed)) {
-				RadarBlock found = null;
-				foreach(RadarBlock r in allRadars) {
-					if(r.block == removed) {
-						found = r;
-						break;
-					}
-				}
-
-				if(found != null) {
-					found.block.FatBlock.IsWorkingChanged -= WorkingChanged;
-					allRadars.Remove(found);
-					logger.debugLog("Radar block removed", "BlockRemoved");
-				} else {
-					logger.log(Logger.severity.ERROR, "BlockRemoved", 
-						"Radar block removed but was not found in list.");
-				}
-
-				RecalculateSectorCoverage();
-			}
-		}
-		#endregion
-
-		#region SE Hooks - Working Changed
-		/// <summary>
-		/// Hook for when a block's working status changes.  I.e. it loses power,
-		/// is damaged, or is turned off.
-		/// </summary>
-		/// <param name="block"></param>
-		private void WorkingChanged(IMyCubeBlock block) {
-			if (IsBlockRadar(block.SlimBlock)) {
-				logger.debugLog("A radar's IsWorking has changed.", "WorkingChanged");
-				RecalculateSectorCoverage();
+				shortRange.RemoveRadar(removed);
 			}
 		}
 		#endregion
@@ -186,7 +130,7 @@ namespace SEEW.Grids {
 		private void DoSweep() {
 			//logger.debugLog("Beginning sweep", "UpdateBeforeSimulation100");
 
-			RecalculateRadarRange();
+			shortRange.RecalculateRadarRange();
 
 			Vector3D position = grid.GetPosition();
 
@@ -202,7 +146,7 @@ namespace SEEW.Grids {
 			// Find all entities within the range
 			// TODO: Make range configurable via antenna properties
 			VRageMath.BoundingSphereD sphere 
-				= new VRageMath.BoundingSphereD(position, radarRange);
+				= new VRageMath.BoundingSphereD(position, GetMaxRadarRange());
 			List<IMyEntity> ents 
 				= MyAPIGateway.Entities.GetEntitiesInSphere(ref sphere);
 
@@ -219,78 +163,44 @@ namespace SEEW.Grids {
 					VRageMath.Vector3D relative 
 						= VRageMath.Vector3D.Transform(
 							epos, grid.WorldMatrixNormalizedInv);
-					//logger.debugLog("Contact has grid-space vector " + relative.ToString(), "DoSweep");
 
-					Sector sec = SectorExtensions.ClassifyVector(relative);
-					//logger.debugLog("Contact is in sector " + sec, "DoSweep");
 
-					//Check that the sector is covered by our radars
-					// If it isn't, skip this contact.  It will be pruned below
-					if (IsSectorBlind(sec))
-						continue;
+					// Let the radar systems decide if they are able to
+					// track this contact
+					double xsec;
+					if(shortRange.CanTrackTarget(e as IMyCubeGrid, relative, out xsec)) {
+						// If we can track it
+						// Check if this contact is already in the tracks dictionary
+						Track oldTrack = null;
+						if (allTracks.TryGetValue(e.EntityId, out oldTrack)) {
+							m++;
+							oldTrack.gps.Coords = epos;
+							oldTrack.gps.Name
+								= $"~Track {oldTrack.trackId} ({(int)xsec}m²)~";
+							oldTrack.lost = false;
+						} else {
+							n++;
 
-					// Check that the contact is large enough for us to see
-					// Do this by comparing the radar cross-section to the
-					// minimum cross-section the radar is capable of seeing at
-					// this range
-					Vector3D vecTo = epos - position;
-					double xsec 
-						= EWMath.DetermineXSection(e as IMyCubeGrid, vecTo);
-					double range = vecTo.Length();
-					double minxsec
-						= EWMath.MinimumXSection(Constants.radarBeamWidth, range);
-					//logger.debugLog($"Minimum xsec at range {range} is {minxsec}", "DoSweep");
-					//logger.debugLog($"Contact xsec is {xsec} and minimum is {minxsec}", "DoSweep");
-					if (xsec < minxsec)
-						continue;
+							string id = e.EntityId.ToString();
+							id = id.Substring(Math.Max(0, id.Length - 5));
 
-					// Check if there is something between the radar
-					// and the contact
-					vecTo.Normalize();
-					Vector3D castPosition = position + (vecTo * grid.LocalAABB.Size *1.2);
-					// TODO: CastRay inefficient over long distances
-					//if (range <= 100) {
-						IHitInfo hit;
-						if (MyAPIGateway.Physics.CastRay(castPosition, epos, out hit)) {
-							if (hit.HitEntity != e) {
-								//logger.debugLog($"Contact {e.EntityId} obscured by {hit.HitEntity.EntityId}", "DoSweep");
-								continue;
-							}
+							Track newTrack = new Track() {
+								lost = false,
+								ent = e,
+								gps = MyAPIGateway.Session.GPS.Create(
+									$"~Track {id} ({(int)xsec}m²)~", "Radar Track",
+									epos, true, true),
+								trackId = id
+							};
+
+							MyAPIGateway.Session.GPS.AddLocalGps(newTrack.gps);
+
+							MyVisualScriptLogicProvider.SetGPSColor(
+								newTrack.gps.Name,
+								Constants.Color_RadarContact);
+
+							allTracks.Add(e.EntityId, newTrack);
 						}
-					/*} else {
-
-					}*/
-
-					// Check if this contact is already in the tracks dictionary
-					Track oldTrack = null;
-					if(allTracks.TryGetValue(e.EntityId, out oldTrack)) {
-						m++;
-						oldTrack.gps.Coords = epos;
-						oldTrack.gps.Name 
-							= $"~Track {oldTrack.trackId} ({(int)xsec}m²)~";
-						oldTrack.lost = false;
-					} else {
-						n++;
-
-						string id = e.EntityId.ToString();
-						id = id.Substring(Math.Max(0, id.Length - 5));
-
-						Track newTrack = new Track() {
-							lost = false,
-							ent = e,
-							gps = MyAPIGateway.Session.GPS.Create(
-								$"~Track {id} ({(int)xsec}m²)~", "Radar Track",
-								epos, true, true),
-							trackId = id
-						};
-
-						MyAPIGateway.Session.GPS.AddLocalGps(newTrack.gps);
-
-						MyVisualScriptLogicProvider.SetGPSColor(
-							newTrack.gps.Name, 
-							Constants.Color_RadarContact);
-
-						allTracks.Add(e.EntityId, newTrack);
 					}
 					
 				}
@@ -326,84 +236,17 @@ namespace SEEW.Grids {
 		/// <returns></returns>
 		private bool IsBlockRadar(IMySlimBlock block) {
 			return block.FatBlock != null &&
+				block.FatBlock.BlockDefinition.TypeId == typeof(MyObjectBuilder_UpgradeModule) &&
 				block.FatBlock.BlockDefinition.SubtypeId.StartsWith(
-					"EWPhasedRadar");
+					"EWRadar");
 		}
 
 		/// <summary>
-		/// Determines which sector the emitting face of a radar is pointing at
+		/// Finds the maximum range of all the radar systems on this grid
 		/// </summary>
-		/// <param name="antenna"></param>
 		/// <returns></returns>
-		private Sector DetermineAntennaSector(IMySlimBlock antenna) {
-			// Start with the default direction
-			// The model antenna points in the +X, +Y, and -Z directions
-			VRageMath.Vector3D direction 
-				= new VRageMath.Vector3D(1.0f, 1.0f, -1.0f);
-
-			// Rotate this vector by the orientation of the block
-			VRageMath.Vector3D rotated = VRageMath.Vector3D.Rotate(
-				direction, antenna.FatBlock.LocalMatrix);
-
-			logger.debugLog("New radar's vector is " + rotated.ToString(), 
-				"DetermineAntennaSector");
-
-			return SectorExtensions.ClassifyVector(rotated);
-		}
-
-		/// <summary>
-		/// Runs through the list of radars on this grid and determines
-		/// which sectors have coverage
-		/// </summary>
-		private void RecalculateSectorCoverage() {
-			// Reset coverage to zero
-			radarCoverage = Sector.NONE;
-			radarRange = 0;
-
-			foreach(RadarBlock r in allRadars) {
-				if(r.block.FatBlock.IsWorking)
-					radarCoverage |= r.sector;
-
-				radarRange = Math.Max(radarRange,
-					(r.block.FatBlock as IMyRadioAntenna).Radius);
-			}
-
-			logger.debugLog(
-				$"Recomputed sector coverage of {allRadars.Count} radars to be " 
-				+ String.Format("0x{0:X}", radarCoverage) + " with range " 
-				+ radarRange, 
-				"RecalculateSectorCoverage");
-		}
-
-		/// <summary>
-		/// Sets the overall radar range to the greatest setting of all
-		/// the attached radar blocks
-		/// </summary>
-		private void RecalculateRadarRange() {
-			radarRange = 0;
-
-			foreach (RadarBlock r in allRadars) {
-				radarRange = Math.Max(radarRange,
-					(r.block.FatBlock as IMyRadioAntenna).Radius);
-			}
-		}
-
-		/// <summary>
-		/// Returns true if a sector is covered by the attached radars
-		/// </summary>
-		/// <param name="s"></param>
-		/// <returns></returns>
-		private bool IsSectorCovered(Sector s) {
-			return (radarCoverage & s) != 0;
-		}
-
-		/// <summary>
-		/// Returns true if the sector has no radar covering it
-		/// </summary>
-		/// <param name="s"></param>
-		/// <returns></returns>
-		private bool IsSectorBlind(Sector s) {
-			return (radarCoverage & s) == 0;
+		private double GetMaxRadarRange() {
+			return shortRange.GetRange();
 		}
 		#endregion
 	}
