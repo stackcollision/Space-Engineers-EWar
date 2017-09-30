@@ -104,7 +104,7 @@
     <Compile Include="Blocks\RadarController.cs" />
     <Compile Include="Constants.cs" />
     <Compile Include="Core\CoreComponent.cs" />
-    <Compile Include="Records\RadarSystemSettings.cs" />
+    <Compile Include="Records\RadarSettings.cs" />
     <Compile Include="Utility\EWMath.cs" />
     <Compile Include="Grids\Player.cs" />
     <Compile Include="Logger.cs" />

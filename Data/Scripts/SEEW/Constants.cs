@@ -25,5 +25,7 @@ namespace SEEW {
 		/// </summary>
 		public const double radarBeamWidth = 0.005;
 
+		public static Guid GUIDRadarSettings = new Guid("d3b29e41-392d-400c-a46a-5b68e4938f2a");
+
 	}
 }

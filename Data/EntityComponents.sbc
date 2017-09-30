@@ -1,0 +1,14 @@
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <EntityComponents>
+    <EntityComponent xsi:type="MyObjectBuilder_ModStorageComponentDefinition">
+      <Id>
+        <TypeId>ModStorageComponent</TypeId>
+        <SubtypeId>Holo</SubtypeId>
+      </Id>
+      <RegisteredStorageGuids>
+        <!-- Radar settings -->
+        <guid>d3b29e41-392d-400c-a46a-5b68e4938f2a</guid>
+      </RegisteredStorageGuids>
+    </EntityComponent>
+  </EntityComponents>
+</Definitions>

@@ -26,17 +26,17 @@ namespace SEEW.Core {
 	public class CoreComponent : MySessionComponentBase {
 
 		#region Instance Members
-		private Logger logger;
+		private Logger _logger;
 
-		private bool initialized = false;
+		private bool _initialized = false;
 
-		private List<IMyTerminalControl> phasedRadarControls 
+		private List<IMyTerminalControl> _radarControls 
 			= new List<IMyTerminalControl>();
 
 		// Used for listboxes
-		private List<RadarController.RadarBlock> selectedUnassigned 
+		private List<RadarController.RadarBlock> _selectedUnassigned 
 			= new List<RadarController.RadarBlock>();
-		private List<RadarController.RadarBlock> selectedAssigned
+		private List<RadarController.RadarBlock> _selectedAssigned
 			= new List<RadarController.RadarBlock>();
 		#endregion
 
@@ -48,12 +48,12 @@ namespace SEEW.Core {
 		public override void Init(MyObjectBuilder_SessionComponent sessionComponent) {
 			base.Init(sessionComponent);
 
-			logger = new Logger("EWar", "CoreComponent");
+			_logger = new Logger("EWar", "CoreComponent");
 		}
 
 		public override void UpdateBeforeSimulation() {
 			// Initialize on the first frame with Session is not null
-			if(!initialized) {
+			if(!_initialized) {
 				if(MyAPIGateway.Session != null) {
 
 					MakeControls();
@@ -64,10 +64,10 @@ namespace SEEW.Core {
 
 					//MyAPIGateway.Multiplayer.RegisterMessageHandler(Constants.MIDRadarSettings, HandleRadarSystemSettings);
 
-					logger.debugLog("Initialized", "UpdateBeforeSimulation");
-					logger.debugLog("IsServer = " + Helpers.IsServer, "UpdateBeforeSimulation");
+					_logger.debugLog("Initialized", "UpdateBeforeSimulation");
+					_logger.debugLog("IsServer = " + Helpers.IsServer, "UpdateBeforeSimulation");
 
-					initialized = true;
+					_initialized = true;
 				}
 			}
 		}
@@ -84,12 +84,12 @@ namespace SEEW.Core {
 
 			SerializableDefinitionId def = block.SlimBlock.FatBlock.BlockDefinition;
 
-			logger.debugLog($"Hit for block {def.TypeId} {def.SubtypeId}", "ControlGetter");
+			_logger.debugLog($"Hit for block {def.TypeId} {def.SubtypeId}", "ControlGetter");
 
 			if (def.TypeId == typeof(MyObjectBuilder_UpgradeModule)
 				&& def.SubtypeId == "EWControllerRadar") {
 
-				controls.AddRange(phasedRadarControls);
+				controls.AddRange(_radarControls);
 			}
 		}
 
@@ -100,37 +100,51 @@ namespace SEEW.Core {
 
 			IMyTerminalControlSeparator sep1
 				= MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSeparator, IMyUpgradeModule>("Sep1");
-			phasedRadarControls.Add(sep1);
+			_radarControls.Add(sep1);
 
-			/*IMyTerminalControlSlider rangeSlider
+			IMyTerminalControlSlider rangeSlider
 				= MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, IMyUpgradeModule>("RangeSlider");
 			rangeSlider.Title = MyStringId.GetOrCompute("Range");
-			rangeSlider.Tooltip = MyStringId.GetOrCompute("Maximum range of this radar system (Affects all radars on this grid of the same type)");
+			rangeSlider.Tooltip = MyStringId.GetOrCompute("Maximum range of this radar system");
 			rangeSlider.SetLimits(100, 15000);
 			rangeSlider.Getter = (block) => {
-				RadarManager radar = block.CubeGrid.GameLogic.GetAs<RadarManager>();
-				if (radar != null)
-					return radar.GetRadarSettings().range;
-				else
-					return 100;
+				RadarController controller = block.GameLogic.GetAs<RadarController>();
+				return controller.GetRange();
 			};
 			rangeSlider.Setter = (block, value) => {
-				RadarManager radar = block.CubeGrid.GameLogic.GetAs<RadarManager>();
-				if (radar != null) {
-					radar.GetRadarSettings().range = (int)value;
-					SendRadarSystemSettings(block.CubeGrid.EntityId);
-				}
+				RadarController controller = block.GameLogic.GetAs<RadarController>();
+				controller.SetRange((int)value);
+				//SendRadarSystemSettings(block.CubeGrid.EntityId);
 			};
 			rangeSlider.Writer = (block, str) => {
-				RadarManager radar = block.CubeGrid.GameLogic.GetAs<RadarManager>();
-				if (radar != null)
-					str.Append(radar.GetRadarSettings().range + "m");
+				RadarController controller = block.GameLogic.GetAs<RadarController>();
+				str.Append(controller.GetRange() + "m");
 			};
-			phasedRadarControls.Add(rangeSlider);*/
+			_radarControls.Add(rangeSlider);
+
+			IMyTerminalControlSlider freqSlider
+				= MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, IMyUpgradeModule>("FreqSlider");
+			freqSlider.Title = MyStringId.GetOrCompute("Frequency");
+			freqSlider.Tooltip = MyStringId.GetOrCompute("Operating frequency of this system");
+			freqSlider.SetLimits(8.0f,12.0f);
+			freqSlider.Getter = (block) => {
+				RadarController controller = block.GameLogic.GetAs<RadarController>();
+				return controller.GetFreq();
+			};
+			freqSlider.Setter = (block, value) => {
+				RadarController controller = block.GameLogic.GetAs<RadarController>();
+				controller.SetFreq(value);
+				//SendRadarSystemSettings(block.CubeGrid.EntityId);
+			};
+			freqSlider.Writer = (block, str) => {
+				RadarController controller = block.GameLogic.GetAs<RadarController>();
+				str.Append(controller.GetFreq() + "GHz");
+			};
+			_radarControls.Add(freqSlider);
 
 			IMyTerminalControlSeparator sep2
 				= MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSeparator, IMyUpgradeModule>("Sep2");
-			phasedRadarControls.Add(sep2);
+			_radarControls.Add(sep2);
 
 			IMyTerminalControlListbox unassignedList
 					= MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyUpgradeModule>("UnassignedList");
@@ -139,15 +153,12 @@ namespace SEEW.Core {
 			unassignedList.Multiselect = true;
 			unassignedList.VisibleRowsCount = 6;
 			unassignedList.ListContent = (block, items, selected) => {
-				logger.debugLog("Populating list", "ListContent");
-
 				RadarController controller 
 					= block.GameLogic.GetAs<RadarController>();
 				List<RadarController.RadarBlock> available 
 					= controller.GetAvailableRadars();
 
 				foreach(RadarController.RadarBlock r in available) {
-					logger.debugLog("Adding " + r.block.FatBlock.DisplayNameText, "ListContent");
 					MyTerminalControlListBoxItem item
 						= new MyTerminalControlListBoxItem(
 								MyStringId.GetOrCompute(r.block.FatBlock.DisplayNameText),
@@ -158,19 +169,19 @@ namespace SEEW.Core {
 				}
 			};
 			unassignedList.ItemSelected = (block, items) => {
-				selectedUnassigned.Clear();
+				_selectedUnassigned.Clear();
 				
 				foreach(MyTerminalControlListBoxItem item in items) {
-					selectedUnassigned.Add(item.UserData as RadarController.RadarBlock);
+					_selectedUnassigned.Add(item.UserData as RadarController.RadarBlock);
 				}
 			};
-			phasedRadarControls.Add(unassignedList);
+			_radarControls.Add(unassignedList);
 
 			IMyTerminalControlButton addButton
 				= MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyUpgradeModule>("AddButton");
 			addButton.Title = MyStringId.GetOrCompute("Assign");
 			addButton.Tooltip = MyStringId.GetOrCompute("Assign the selected radar to this system.");
-			phasedRadarControls.Add(addButton);
+			_radarControls.Add(addButton);
 
 			IMyTerminalControlListbox assignedList
 					= MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyUpgradeModule>("AssignedList");
@@ -195,13 +206,13 @@ namespace SEEW.Core {
 				}
 			};
 			assignedList.ItemSelected = (block, items) => {
-				selectedAssigned.Clear();
+				_selectedAssigned.Clear();
 
 				foreach (MyTerminalControlListBoxItem item in items) {
-					selectedAssigned.Add(item.UserData as RadarController.RadarBlock);
+					_selectedAssigned.Add(item.UserData as RadarController.RadarBlock);
 				}
 			};
-			phasedRadarControls.Add(assignedList);
+			_radarControls.Add(assignedList);
 			
 			// Add button action must be after assigned list because it
 			// needs the pointer
@@ -209,7 +220,7 @@ namespace SEEW.Core {
 				RadarController controller
 					= block.GameLogic.GetAs<RadarController>();
 
-				foreach (RadarController.RadarBlock radar in selectedUnassigned) {
+				foreach (RadarController.RadarBlock radar in _selectedUnassigned) {
 					controller.AssignRadar(radar);
 				}
 
@@ -225,14 +236,14 @@ namespace SEEW.Core {
 				RadarController controller
 					= block.GameLogic.GetAs<RadarController>();
 
-				foreach (RadarController.RadarBlock radar in selectedUnassigned) {
+				foreach (RadarController.RadarBlock radar in _selectedUnassigned) {
 					controller.UnassignedRadar(radar);
 				}
 
 				unassignedList.UpdateVisual();
 				assignedList.UpdateVisual();
 			};
-			phasedRadarControls.Add(removeButton);
+			_radarControls.Add(removeButton);
 
 
 			//
