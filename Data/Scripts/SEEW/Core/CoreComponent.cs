@@ -34,10 +34,10 @@ namespace SEEW.Core {
 			= new List<IMyTerminalControl>();
 
 		// Used for listboxes
-		private List<RadarController.RadarBlock> _selectedUnassigned 
-			= new List<RadarController.RadarBlock>();
-		private List<RadarController.RadarBlock> _selectedAssigned
-			= new List<RadarController.RadarBlock>();
+		private List<RadarController.Radar> _selectedUnassigned 
+			= new List<RadarController.Radar>();
+		private List<RadarController.Radar> _selectedAssigned
+			= new List<RadarController.Radar>();
 		#endregion
 
 		#region Lifecycle
@@ -155,10 +155,10 @@ namespace SEEW.Core {
 			unassignedList.ListContent = (block, items, selected) => {
 				RadarController controller 
 					= block.GameLogic.GetAs<RadarController>();
-				List<RadarController.RadarBlock> available 
+				IEnumerable<RadarController.Radar> available 
 					= controller.GetAvailableRadars();
 
-				foreach(RadarController.RadarBlock r in available) {
+				foreach (RadarController.Radar r in available) {
 					MyTerminalControlListBoxItem item
 						= new MyTerminalControlListBoxItem(
 								MyStringId.GetOrCompute(r.block.FatBlock.DisplayNameText),
@@ -172,7 +172,7 @@ namespace SEEW.Core {
 				_selectedUnassigned.Clear();
 				
 				foreach(MyTerminalControlListBoxItem item in items) {
-					_selectedUnassigned.Add(item.UserData as RadarController.RadarBlock);
+					_selectedUnassigned.Add(item.UserData as RadarController.Radar);
 				}
 			};
 			_radarControls.Add(unassignedList);
@@ -192,10 +192,10 @@ namespace SEEW.Core {
 			assignedList.ListContent = (block, items, selected) => {
 				RadarController controller
 					= block.GameLogic.GetAs<RadarController>();
-				List<RadarController.RadarBlock> assigned
+				List<RadarController.Radar> assigned
 					= controller.GetAssignedRadars();
 
-				foreach (RadarController.RadarBlock r in assigned) {
+				foreach (RadarController.Radar r in assigned) {
 					MyTerminalControlListBoxItem item
 						= new MyTerminalControlListBoxItem(
 								MyStringId.GetOrCompute(r.block.FatBlock.DisplayNameText),
@@ -209,7 +209,7 @@ namespace SEEW.Core {
 				_selectedAssigned.Clear();
 
 				foreach (MyTerminalControlListBoxItem item in items) {
-					_selectedAssigned.Add(item.UserData as RadarController.RadarBlock);
+					_selectedAssigned.Add(item.UserData as RadarController.Radar);
 				}
 			};
 			_radarControls.Add(assignedList);
@@ -220,7 +220,7 @@ namespace SEEW.Core {
 				RadarController controller
 					= block.GameLogic.GetAs<RadarController>();
 
-				foreach (RadarController.RadarBlock radar in _selectedUnassigned) {
+				foreach (RadarController.Radar radar in _selectedUnassigned) {
 					controller.AssignRadar(radar);
 				}
 
@@ -236,7 +236,7 @@ namespace SEEW.Core {
 				RadarController controller
 					= block.GameLogic.GetAs<RadarController>();
 
-				foreach (RadarController.RadarBlock radar in _selectedUnassigned) {
+				foreach (RadarController.Radar radar in _selectedAssigned) {
 					controller.UnassignedRadar(radar);
 				}
 

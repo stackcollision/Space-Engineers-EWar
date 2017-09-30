@@ -39,10 +39,18 @@ namespace SEEW.Blocks {
 		/// <summary>
 		/// Represents a radar block on the ship
 		/// </summary>
-		public class RadarBlock {
+		public class Radar {
 			public IMySlimBlock block;
 			public Sector sector;
 			public RadarType type;
+
+			public RadarBlock radarBlock { get {
+					return block.FatBlock.GameLogic.GetAs<RadarBlock>();
+				} }
+
+			public long entID { get {
+					return block.FatBlock.EntityId;
+				} }
 		}
 
 		public enum RadarType {
@@ -60,8 +68,8 @@ namespace SEEW.Blocks {
 
 		private Dictionary<long, Track> _allTracks = new Dictionary<long, Track>();
 
-		private List<RadarBlock> _allRadars = new List<RadarBlock>();
-		private List<RadarBlock> _assignedRadars = new List<RadarBlock>();
+		private List<Radar> _allRadars = new List<Radar>();
+		private List<Radar> _assignedRadars = new List<Radar>();
 		private RadarType _assignedType = RadarType.NONE;
 		private Sector _coverage = Sector.NONE;
 
@@ -138,7 +146,7 @@ namespace SEEW.Blocks {
 			if (IsBlockRadar(added)) {
 				_logger.debugLog("New radar block added", "BlockAdded");
 
-				RadarBlock radar = new RadarBlock() {
+				Radar radar = new Radar() {
 					block = added,
 					sector = DetermineAntennaSector(added),
 					type = DetermineRadarType(added)
@@ -162,8 +170,8 @@ namespace SEEW.Blocks {
 		private void BlockRemoved(IMySlimBlock removed) {
 			if (IsBlockRadar(removed)) {
 				// Remove from the all list
-				RadarBlock found = null;
-				foreach (RadarBlock r in _allRadars) {
+				Radar found = null;
+				foreach (Radar r in _allRadars) {
 					if (r.block == removed) {
 						found = r;
 						break;
@@ -336,18 +344,58 @@ namespace SEEW.Blocks {
 		#endregion
 
 		#region Interface
-		public List<RadarBlock> GetAvailableRadars() {
-			return _allRadars;
+		/// <summary>
+		/// Returns all of the radars on this grid which are not assigned
+		/// to a radar system
+		/// </summary>
+		/// <returns></returns>
+		public IEnumerable<Radar> GetAvailableRadars() {
+			return _allRadars.Where((radar) => {
+				RadarBlock r = radar.radarBlock;
+				return !r.isAssigned;
+			});
 		}
 
-		public List<RadarBlock> GetAssignedRadars() {
+		/// <summary>
+		/// Returns all of the radars assigned to this system
+		/// </summary>
+		/// <returns></returns>
+		public List<Radar> GetAssignedRadars() {
 			return _assignedRadars;
 		}
 
-		public void AssignRadar(RadarBlock radar) {
+		/// <summary>
+		/// Assigns a radar to this system
+		/// </summary>
+		/// <param name="radar"></param>
+		/// <param name="loading">Set to true when initially loading
+		/// the world.  If this is set to true, assigning the block
+		/// will not modify the list of assigned IDs which will be saved.</param>
+		public void AssignRadar(Radar radar, bool loading = false) {
 			if (IsRadarCompatible(radar)) {
 				_assignedRadars.Add(radar);
-				_settings.assignedIds.Add(radar.block.FatBlock.EntityId);
+				radar.radarBlock.isAssigned = true;
+
+				if (loading == false) {
+					_settings.assignedIds.Add(radar.entID);
+					SaveRadarSettings();
+				}
+
+				RecalculateSectorCoverage();
+				ReclassifySystem();
+			}
+		}
+
+		/// <summary>
+		/// Removes a radar from this system
+		/// </summary>
+		/// <param name="radar"></param>
+		public void UnassignedRadar(Radar radar) {
+			if (_assignedRadars.Contains(radar)) {
+				_assignedRadars.Remove(radar);
+				radar.radarBlock.isAssigned = false;
+
+				_settings.assignedIds.Remove(radar.entID);
 				SaveRadarSettings();
 
 				RecalculateSectorCoverage();
@@ -355,28 +403,35 @@ namespace SEEW.Blocks {
 			}
 		}
 
-		public void UnassignedRadar(RadarBlock radar) {
-			if (_assignedRadars.Contains(radar)) {
-				_assignedRadars.Remove(radar);
-
-				RecalculateSectorCoverage();
-				ReclassifySystem();
-			}
-		}
-
+		/// <summary>
+		/// Returns the max range for this system in meters
+		/// </summary>
+		/// <returns></returns>
 		public int GetRange() {
 			return _settings.range;
 		}
 
+		/// <summary>
+		/// Sets the range for this system in meters
+		/// </summary>
+		/// <param name="range"></param>
 		public void SetRange(int range) {
 			_settings.range = range;
 			SaveRadarSettings();
 		}
 
+		/// <summary>
+		/// Gets the operating frequency of this radar
+		/// </summary>
+		/// <returns></returns>
 		public float GetFreq() {
 			return _settings.frequency;
 		}
 
+		/// <summary>
+		/// Sets the operating frequency, rounded to the nearest tenth of a GHz
+		/// </summary>
+		/// <param name="freq"></param>
 		public void SetFreq(float freq) {
 			_settings.frequency = (float)Math.Round(freq, 1);
 			SaveRadarSettings();
@@ -447,7 +502,7 @@ namespace SEEW.Blocks {
 			// Reset coverage to zero
 			_coverage = Sector.NONE;
 
-			foreach (RadarBlock r in _assignedRadars) {
+			foreach (Radar r in _assignedRadars) {
 				if (r.block.FatBlock.IsWorking)
 					_coverage |= r.sector;
 			}
@@ -482,7 +537,7 @@ namespace SEEW.Blocks {
 		/// </summary>
 		/// <param name="radar"></param>
 		/// <returns></returns>
-		private bool IsRadarCompatible(RadarBlock radar) {
+		private bool IsRadarCompatible(Radar radar) {
 			return _assignedType == RadarType.NONE ||
 				_assignedType == radar.type;
 		}
@@ -526,9 +581,10 @@ namespace SEEW.Blocks {
 				_settings = MyAPIGateway.Utilities.SerializeFromXML<RadarSettings>(Entity.Storage[Constants.GUIDRadarSettings]);
 
 				// Process assignments
-				foreach(RadarBlock r in _allRadars) {
-					if (_settings.assignedIds.Contains(r.block.FatBlock.EntityId))
-						_assignedRadars.Add(r);
+				foreach(Radar r in _allRadars) {
+					if (_settings.assignedIds.Contains(r.block.FatBlock.EntityId)) {
+						AssignRadar(r, true);
+					}
 				}
 				RecalculateSectorCoverage();
 				ReclassifySystem();

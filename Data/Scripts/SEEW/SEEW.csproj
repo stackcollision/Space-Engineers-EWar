@@ -100,7 +100,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Blocks\PhasedRadar.cs" />
+    <Compile Include="Blocks\RadarBlock.cs" />
     <Compile Include="Blocks\RadarController.cs" />
     <Compile Include="Constants.cs" />
     <Compile Include="Core\CoreComponent.cs" />
