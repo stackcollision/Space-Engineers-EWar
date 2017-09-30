@@ -14,6 +14,7 @@ using VRageMath;
 using Sandbox.ModAPI;
 using SEEW.Utility;
 using Sandbox.Game;
+using Sandbox.Game.World;
 
 namespace SEEW.Blocks {
 
@@ -37,7 +38,7 @@ namespace SEEW.Blocks {
 		/// <summary>
 		/// Represents a radar block on the ship
 		/// </summary>
-		private class RadarBlock {
+		public class RadarBlock {
 			public IMySlimBlock block;
 			public Sector sector;
 			public RadarType type;
@@ -128,16 +129,11 @@ namespace SEEW.Blocks {
 					type = DetermineRadarType(added)
 				};
 				_allRadars.Add(radar);
-				
-				//Testing
-				_assignedRadars.Add(radar);
 
 				radar.block.FatBlock.IsWorkingChanged += WorkingChanged;
 
 				_logger.debugLog("New radar block faces sector " + radar.sector,
 					"BlockAdded");
-
-				RecalculateSectorCoverage();
 			}
 		}
 		#endregion
@@ -150,7 +146,6 @@ namespace SEEW.Blocks {
 		/// <param name="removed"></param>
 		private void BlockRemoved(IMySlimBlock removed) {
 			if (IsBlockRadar(removed)) {
-
 				// Remove from the all list
 				RadarBlock found = null;
 				foreach (RadarBlock r in _allRadars) {
@@ -183,6 +178,7 @@ namespace SEEW.Blocks {
 				}
 
 				RecalculateSectorCoverage();
+				ReclassifySystem();
 			}
 		}
 		#endregion
@@ -334,6 +330,34 @@ namespace SEEW.Blocks {
 		}
 		#endregion
 
+		#region Interface
+		public List<RadarBlock> GetAvailableRadars() {
+			return _allRadars;
+		}
+
+		public List<RadarBlock> GetAssignedRadars() {
+			return _assignedRadars;
+		}
+
+		public void AssignRadar(RadarBlock radar) {
+			if (IsRadarCompatible(radar)) {
+				_assignedRadars.Add(radar);
+
+				RecalculateSectorCoverage();
+				ReclassifySystem();
+			}
+		}
+
+		public void UnassignedRadar(RadarBlock radar) {
+			if (_assignedRadars.Contains(radar)) {
+				_assignedRadars.Remove(radar);
+
+				RecalculateSectorCoverage();
+				ReclassifySystem();
+			}
+		}
+		#endregion
+
 		#region Helpers
 		/// <summary>
 		/// Returns true if the block is a radar emitter
@@ -408,6 +432,34 @@ namespace SEEW.Blocks {
 				+ String.Format("0x{0:X}", _coverage) + " with range "
 				+ _range,
 				"RecalculateSectorCoverage");
+		}
+
+		/// <summary>
+		/// Looks at the assigned radars and determines the type of radar
+		/// system this is.
+		/// The first block placed will classify the system.
+		/// Once the system is classified, radar blocks not of the correct
+		/// type cannot be added.
+		/// </summary>
+		private void ReclassifySystem() {
+			if(_assignedRadars.Count == 0) {
+				// The system has become unclassified
+				_assignedType = RadarType.NONE;
+			} else {
+				_assignedType = _assignedRadars[0].type;
+			}
+		}
+
+		/// <summary>
+		/// A radar is only compatible (and thus can be assigned)
+		/// to this system if it has the same type as the radars already
+		/// assigned, or if the system is unclassified.
+		/// </summary>
+		/// <param name="radar"></param>
+		/// <returns></returns>
+		private bool IsRadarCompatible(RadarBlock radar) {
+			return _assignedType == RadarType.NONE ||
+				_assignedType == radar.type;
 		}
 
 		/// <summary>

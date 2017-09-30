@@ -15,6 +15,8 @@ using SEEW.Utility;
 using VRage.Utils;
 using SEEW.Records;
 using VRage.Game.ModAPI.Ingame;
+using SEEW.Blocks;
+using VRage.ModAPI;
 
 namespace SEEW.Core {
 	/// <summary>
@@ -30,6 +32,12 @@ namespace SEEW.Core {
 
 		private List<IMyTerminalControl> phasedRadarControls 
 			= new List<IMyTerminalControl>();
+
+		// Used for listboxes
+		private List<RadarController.RadarBlock> selectedUnassigned 
+			= new List<RadarController.RadarBlock>();
+		private List<RadarController.RadarBlock> selectedAssigned
+			= new List<RadarController.RadarBlock>();
 		#endregion
 
 		#region Lifecycle
@@ -79,10 +87,9 @@ namespace SEEW.Core {
 			logger.debugLog($"Hit for block {def.TypeId} {def.SubtypeId}", "ControlGetter");
 
 			if (def.TypeId == typeof(MyObjectBuilder_UpgradeModule)
-				&& def.SubtypeId == "EWRadarSearchPhased") {
+				&& def.SubtypeId == "EWControllerRadar") {
 
 				controls.AddRange(phasedRadarControls);
-
 			}
 		}
 
@@ -90,6 +97,143 @@ namespace SEEW.Core {
 		/// Creates all of the custom controls for the blocks
 		/// </summary>
 		private void MakeControls() {
+
+			IMyTerminalControlSeparator sep1
+				= MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSeparator, IMyUpgradeModule>("Sep1");
+			phasedRadarControls.Add(sep1);
+
+			/*IMyTerminalControlSlider rangeSlider
+				= MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, IMyUpgradeModule>("RangeSlider");
+			rangeSlider.Title = MyStringId.GetOrCompute("Range");
+			rangeSlider.Tooltip = MyStringId.GetOrCompute("Maximum range of this radar system (Affects all radars on this grid of the same type)");
+			rangeSlider.SetLimits(100, 15000);
+			rangeSlider.Getter = (block) => {
+				RadarManager radar = block.CubeGrid.GameLogic.GetAs<RadarManager>();
+				if (radar != null)
+					return radar.GetRadarSettings().range;
+				else
+					return 100;
+			};
+			rangeSlider.Setter = (block, value) => {
+				RadarManager radar = block.CubeGrid.GameLogic.GetAs<RadarManager>();
+				if (radar != null) {
+					radar.GetRadarSettings().range = (int)value;
+					SendRadarSystemSettings(block.CubeGrid.EntityId);
+				}
+			};
+			rangeSlider.Writer = (block, str) => {
+				RadarManager radar = block.CubeGrid.GameLogic.GetAs<RadarManager>();
+				if (radar != null)
+					str.Append(radar.GetRadarSettings().range + "m");
+			};
+			phasedRadarControls.Add(rangeSlider);*/
+
+			IMyTerminalControlSeparator sep2
+				= MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSeparator, IMyUpgradeModule>("Sep2");
+			phasedRadarControls.Add(sep2);
+
+			IMyTerminalControlListbox unassignedList
+					= MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyUpgradeModule>("UnassignedList");
+			unassignedList.Title = MyStringId.GetOrCompute("Available");
+			unassignedList.Tooltip = MyStringId.GetOrCompute("Radar blocks which are able to be assigned to this system.");
+			unassignedList.Multiselect = true;
+			unassignedList.VisibleRowsCount = 6;
+			unassignedList.ListContent = (block, items, selected) => {
+				logger.debugLog("Populating list", "ListContent");
+
+				RadarController controller 
+					= block.GameLogic.GetAs<RadarController>();
+				List<RadarController.RadarBlock> available 
+					= controller.GetAvailableRadars();
+
+				foreach(RadarController.RadarBlock r in available) {
+					logger.debugLog("Adding " + r.block.FatBlock.DisplayNameText, "ListContent");
+					MyTerminalControlListBoxItem item
+						= new MyTerminalControlListBoxItem(
+								MyStringId.GetOrCompute(r.block.FatBlock.DisplayNameText),
+								MyStringId.GetOrCompute(r.type.ToString()),
+								r
+							);
+					items.Add(item);
+				}
+			};
+			unassignedList.ItemSelected = (block, items) => {
+				selectedUnassigned.Clear();
+				
+				foreach(MyTerminalControlListBoxItem item in items) {
+					selectedUnassigned.Add(item.UserData as RadarController.RadarBlock);
+				}
+			};
+			phasedRadarControls.Add(unassignedList);
+
+			IMyTerminalControlButton addButton
+				= MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyUpgradeModule>("AddButton");
+			addButton.Title = MyStringId.GetOrCompute("Assign");
+			addButton.Tooltip = MyStringId.GetOrCompute("Assign the selected radar to this system.");
+			phasedRadarControls.Add(addButton);
+
+			IMyTerminalControlListbox assignedList
+					= MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyUpgradeModule>("AssignedList");
+			assignedList.Title = MyStringId.GetOrCompute("Assigned");
+			assignedList.Tooltip = MyStringId.GetOrCompute("Radar blocks which are currently assigned to this system.");
+			assignedList.Multiselect = true;
+			assignedList.VisibleRowsCount = 6;
+			assignedList.ListContent = (block, items, selected) => {
+				RadarController controller
+					= block.GameLogic.GetAs<RadarController>();
+				List<RadarController.RadarBlock> assigned
+					= controller.GetAssignedRadars();
+
+				foreach (RadarController.RadarBlock r in assigned) {
+					MyTerminalControlListBoxItem item
+						= new MyTerminalControlListBoxItem(
+								MyStringId.GetOrCompute(r.block.FatBlock.DisplayNameText),
+								MyStringId.GetOrCompute(r.type.ToString()),
+								r
+							);
+					items.Add(item);
+				}
+			};
+			assignedList.ItemSelected = (block, items) => {
+				selectedAssigned.Clear();
+
+				foreach (MyTerminalControlListBoxItem item in items) {
+					selectedAssigned.Add(item.UserData as RadarController.RadarBlock);
+				}
+			};
+			phasedRadarControls.Add(assignedList);
+			
+			// Add button action must be after assigned list because it
+			// needs the pointer
+			addButton.Action = (block) => {
+				RadarController controller
+					= block.GameLogic.GetAs<RadarController>();
+
+				foreach (RadarController.RadarBlock radar in selectedUnassigned) {
+					controller.AssignRadar(radar);
+				}
+
+				unassignedList.UpdateVisual();
+				assignedList.UpdateVisual();
+			};
+
+			IMyTerminalControlButton removeButton
+				= MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyUpgradeModule>("AddButton");
+			removeButton.Title = MyStringId.GetOrCompute("Remove");
+			removeButton.Tooltip = MyStringId.GetOrCompute("Remove the selected radars from the system.");
+			removeButton.Action = (block) => {
+				RadarController controller
+					= block.GameLogic.GetAs<RadarController>();
+
+				foreach (RadarController.RadarBlock radar in selectedUnassigned) {
+					controller.UnassignedRadar(radar);
+				}
+
+				unassignedList.UpdateVisual();
+				assignedList.UpdateVisual();
+			};
+			phasedRadarControls.Add(removeButton);
+
 
 			//
 			// Range Slider
