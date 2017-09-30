@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using VRage.Game.ModAPI;
 using VRageMath;
 
-namespace SEEW {
+namespace SEEW.Utility {
 
 	/// <summary>
 	/// E-war related math functions

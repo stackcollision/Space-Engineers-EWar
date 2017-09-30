@@ -11,6 +11,11 @@ namespace SEEW {
 	public static class Constants {
 
 		/// <summary>
+		/// Message ID numbers
+		/// </summary>
+		public const ushort MIDRadarSettings = 55000;
+
+		/// <summary>
 		/// Color of radar contact beacons
 		/// </summary>
 		public static VRageMath.Color Color_RadarContact = VRageMath.Color.Gold;

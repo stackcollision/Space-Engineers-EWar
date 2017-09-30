@@ -9,7 +9,7 @@
       <DisplayName>Electronic Warfare</DisplayName>
       <Name>Electronic Warfare</Name>
       <ItemIds>
-        <string>RadioAntenna/EWPhasedRadar</string>
+        <string>UpgradeModule/EWRadarSearchPhased</string>
       </ItemIds>
     </Category>
   </CategoryClasses>
