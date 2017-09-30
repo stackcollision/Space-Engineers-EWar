@@ -144,6 +144,13 @@ namespace SEEW.Blocks {
 		/// <param name="added"></param>
 		private void BlockAdded(IMySlimBlock added) {
 			if (IsBlockRadar(added)) {
+				// Check that the block is not already in the array
+				// (can happen when loading)
+				foreach(Radar r in _allRadars) {
+					if (r.block == added)
+						return;
+				}
+
 				_logger.debugLog("New radar block added", "BlockAdded");
 
 				Radar radar = new Radar() {
@@ -260,10 +267,12 @@ namespace SEEW.Blocks {
 					// minimum cross-section the radar is capable of seeing at
 					// this range
 					Vector3D vecTo = targetPos - myPos;
-					double xsec = EWMath.DetermineXSection(e as IMyCubeGrid, vecTo);
+					double xsec 
+						= EWMath.DetermineXSection(e as IMyCubeGrid, vecTo);
 					double range = vecTo.Length();
 					double minxsec
-						= EWMath.MinimumXSection(Constants.radarBeamWidth, range);
+						= EWMath.MinimumXSection(
+							Constants.radarBeamWidths[(int)_assignedType], range);
 					//logger.debugLog($"Minimum xsec at range {range} is {minxsec}", "DoSweep");
 					//logger.debugLog($"Contact xsec is {xsec} and minimum is {minxsec}", "DoSweep");
 					if (xsec < minxsec)
@@ -350,6 +359,7 @@ namespace SEEW.Blocks {
 		/// </summary>
 		/// <returns></returns>
 		public IEnumerable<Radar> GetAvailableRadars() {
+			_logger.log($"There are {_allRadars.Count} radars on this grid", "GetAvailableRadars");
 			return _allRadars.Where((radar) => {
 				RadarBlock r = radar.radarBlock;
 				return !r.isAssigned;
@@ -401,6 +411,10 @@ namespace SEEW.Blocks {
 				RecalculateSectorCoverage();
 				ReclassifySystem();
 			}
+		}
+
+		public RadarType GetRadarType() {
+			return _assignedType;
 		}
 
 		/// <summary>
@@ -525,8 +539,14 @@ namespace SEEW.Blocks {
 			if(_assignedRadars.Count == 0) {
 				// The system has become unclassified
 				_assignedType = RadarType.NONE;
-			} else {
+
+				_settings.range = Constants.radarMinimumRanges[(int)_assignedType];
+				_settings.frequency = Constants.radarMinimumFreqs[(int)_assignedType];
+			} else if(_assignedRadars.Count == 1 && _assignedType == RadarType.NONE) {
 				_assignedType = _assignedRadars[0].type;
+
+				_settings.range = Constants.radarMinimumRanges[(int)_assignedType];
+				_settings.frequency = Constants.radarMinimumFreqs[(int)_assignedType];
 			}
 		}
 
@@ -564,6 +584,9 @@ namespace SEEW.Blocks {
 		/// Saves radar assignments to the Entity Storage
 		/// </summary>
 		private void SaveRadarSettings() {
+			if (!Helpers.IsServer)
+				return;
+
 			Entity.Storage[Constants.GUIDRadarSettings]
 				= MyAPIGateway.Utilities.SerializeToXML<RadarSettings>(_settings);
 			_logger.debugLog("Saved", "SaveRadarSettings");
@@ -573,22 +596,26 @@ namespace SEEW.Blocks {
 		/// Deserializes data saved in the world file
 		/// </summary>
 		private void LoadSavedData() {
-			_logger.debugLog("Starting load", "LoadSavedData");
+			if (Helpers.IsServer) {
+				_logger.debugLog("Starting load", "LoadSavedData");
 
-			if(Entity.Storage.ContainsKey(Constants.GUIDRadarSettings)) {
+				if (Entity.Storage.ContainsKey(Constants.GUIDRadarSettings)) {
 
-				_logger.debugLog("Loading saved radar settings: " + Entity.Storage[Constants.GUIDRadarSettings], "LoadSavedData");
-				_settings = MyAPIGateway.Utilities.SerializeFromXML<RadarSettings>(Entity.Storage[Constants.GUIDRadarSettings]);
+					_logger.debugLog("Loading saved radar settings: " + Entity.Storage[Constants.GUIDRadarSettings], "LoadSavedData");
+					_settings = MyAPIGateway.Utilities.SerializeFromXML<RadarSettings>(Entity.Storage[Constants.GUIDRadarSettings]);
 
-				// Process assignments
-				foreach(Radar r in _allRadars) {
-					if (_settings.assignedIds.Contains(r.block.FatBlock.EntityId)) {
-						AssignRadar(r, true);
+					// Process assignments
+					foreach (Radar r in _allRadars) {
+						if (_settings.assignedIds.Contains(r.block.FatBlock.EntityId)) {
+							AssignRadar(r, true);
+						}
 					}
-				}
-				RecalculateSectorCoverage();
-				ReclassifySystem();
+					RecalculateSectorCoverage();
+					ReclassifySystem();
 
+				}
+			} else {
+				// TODO
 			}
 		}
 		#endregion

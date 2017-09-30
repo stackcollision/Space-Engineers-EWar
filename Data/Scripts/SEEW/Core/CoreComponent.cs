@@ -17,6 +17,7 @@ using SEEW.Records;
 using VRage.Game.ModAPI.Ingame;
 using SEEW.Blocks;
 using VRage.ModAPI;
+using VRageMath;
 
 namespace SEEW.Core {
 	/// <summary>
@@ -33,11 +34,13 @@ namespace SEEW.Core {
 		private List<IMyTerminalControl> _radarControls 
 			= new List<IMyTerminalControl>();
 
-		// Used for listboxes
+		// Used for radar control settings
 		private List<RadarController.Radar> _selectedUnassigned 
 			= new List<RadarController.Radar>();
 		private List<RadarController.Radar> _selectedAssigned
 			= new List<RadarController.Radar>();
+		private IMyTerminalControlSlider _radarRangeSlider = null;
+		private IMyTerminalControlSlider _radarFreqSlider = null;
 		#endregion
 
 		#region Lifecycle
@@ -62,7 +65,8 @@ namespace SEEW.Core {
 					// controls we don't like from the radar
 					MyAPIGateway.TerminalControls.CustomControlGetter += ControlGetter;
 
-					//MyAPIGateway.Multiplayer.RegisterMessageHandler(Constants.MIDRadarSettings, HandleRadarSystemSettings);
+					// Register message handlers
+					//MyAPIGateway.Multiplayer.RegisterMessageHandler(Constants.MIDRadarSettings, HandleRadarSettings);
 
 					_logger.debugLog("Initialized", "UpdateBeforeSimulation");
 					_logger.debugLog("IsServer = " + Helpers.IsServer, "UpdateBeforeSimulation");
@@ -80,14 +84,18 @@ namespace SEEW.Core {
 		/// <param name="block"></param>
 		/// <param name="controls"></param>
 		private void ControlGetter(IMyTerminalBlock block, List<IMyTerminalControl> controls) {
-			
-
+		
 			SerializableDefinitionId def = block.SlimBlock.FatBlock.BlockDefinition;
 
-			_logger.debugLog($"Hit for block {def.TypeId} {def.SubtypeId}", "ControlGetter");
+			//_logger.debugLog($"Hit for block {def.TypeId} {def.SubtypeId}", "ControlGetter");
 
 			if (def.TypeId == typeof(MyObjectBuilder_UpgradeModule)
 				&& def.SubtypeId == "EWControllerRadar") {
+
+				RadarController controller = block.GameLogic.GetAs<RadarController>();
+
+				// Set limits based on radar type
+				SetRadarSliderLimits((int)controller.GetRadarType());
 
 				controls.AddRange(_radarControls);
 			}
@@ -120,6 +128,7 @@ namespace SEEW.Core {
 				RadarController controller = block.GameLogic.GetAs<RadarController>();
 				str.Append(controller.GetRange() + "m");
 			};
+			_radarRangeSlider = rangeSlider;
 			_radarControls.Add(rangeSlider);
 
 			IMyTerminalControlSlider freqSlider
@@ -140,6 +149,7 @@ namespace SEEW.Core {
 				RadarController controller = block.GameLogic.GetAs<RadarController>();
 				str.Append(controller.GetFreq() + "GHz");
 			};
+			_radarFreqSlider = freqSlider;
 			_radarControls.Add(freqSlider);
 
 			IMyTerminalControlSeparator sep2
@@ -149,7 +159,7 @@ namespace SEEW.Core {
 			IMyTerminalControlListbox unassignedList
 					= MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyUpgradeModule>("UnassignedList");
 			unassignedList.Title = MyStringId.GetOrCompute("Available");
-			unassignedList.Tooltip = MyStringId.GetOrCompute("Radar blocks which are able to be assigned to this system.");
+			//unassignedList.Tooltip = MyStringId.GetOrCompute("Radar blocks which are able to be assigned to this system.");
 			unassignedList.Multiselect = true;
 			unassignedList.VisibleRowsCount = 6;
 			unassignedList.ListContent = (block, items, selected) => {
@@ -165,6 +175,7 @@ namespace SEEW.Core {
 								MyStringId.GetOrCompute(r.type.ToString()),
 								r
 							);
+					_logger.debugLog($"Adding to list: {item.Text}", "ListContent");
 					items.Add(item);
 				}
 			};
@@ -226,6 +237,10 @@ namespace SEEW.Core {
 
 				unassignedList.UpdateVisual();
 				assignedList.UpdateVisual();
+
+				SetRadarSliderLimits((int)controller.GetRadarType());
+				rangeSlider.UpdateVisual();
+				freqSlider.UpdateVisual();
 			};
 
 			IMyTerminalControlButton removeButton
@@ -242,43 +257,18 @@ namespace SEEW.Core {
 
 				unassignedList.UpdateVisual();
 				assignedList.UpdateVisual();
+
+				SetRadarSliderLimits((int)controller.GetRadarType());
+				rangeSlider.UpdateVisual();
+				freqSlider.UpdateVisual();
 			};
 			_radarControls.Add(removeButton);
-
-
-			//
-			// Range Slider
-			/*IMyTerminalControlSlider rangeSlider
-				= MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, IMyUpgradeModule>("RangeSlider");
-			rangeSlider.Title = MyStringId.GetOrCompute("Range");
-			rangeSlider.Tooltip = MyStringId.GetOrCompute("Maximum range of this radar system (Affects all radars on this grid of the same type)");
-			rangeSlider.SetLimits(100, 15000);
-			rangeSlider.Getter = (block) => {
-				RadarManager radar = block.CubeGrid.GameLogic.GetAs<RadarManager>();
-				if (radar != null)
-					return radar.GetRadarSettings().range;
-				else
-					return 100;
-			};
-			rangeSlider.Setter = (block, value) => {
-				RadarManager radar = block.CubeGrid.GameLogic.GetAs<RadarManager>();
-				if (radar != null) {
-					radar.GetRadarSettings().range = (int)value;
-					SendRadarSystemSettings(block.CubeGrid.EntityId);
-				}
-			};
-			rangeSlider.Writer = (block, str) => {
-				RadarManager radar = block.CubeGrid.GameLogic.GetAs<RadarManager>();
-				if (radar != null)
-					str.Append(radar.GetRadarSettings().range + "m");
-			};
-			phasedRadarControls.Add(rangeSlider);*/
 
 		}
 		#endregion
 
 		#region Message Handlers
-		/*private void SendRadarSystemSettings(long grid) {
+		/*private void SendRadarSettings(long block) {
 			RadarManager radar = RadarManager.GetForGrid(grid);
 
 			Message<long, RadarSystemSettings> msg
@@ -297,7 +287,7 @@ namespace SEEW.Core {
 			}
 		}
 
-		private void HandleRadarSystemSettings(byte[] data) {
+		private void HandleRadarSettings(byte[] data) {
 			try {
 				Message<long, RadarSystemSettings> msg
 					= Message<long, RadarSystemSettings>.FromXML(data);
@@ -326,5 +316,17 @@ namespace SEEW.Core {
 		}*/
 		#endregion
 
+		#region Helpers
+		private void SetRadarSliderLimits(int type) {
+			_radarRangeSlider.SetLimits(
+						Constants.radarMinimumRanges[type],
+						Constants.radarMaximumRanges[type]
+					);
+			_radarFreqSlider.SetLimits(
+					Constants.radarMinimumFreqs[type],
+					Constants.radarMaximumFreqs[type]
+				);
+		}
+		#endregion
 	}
 }

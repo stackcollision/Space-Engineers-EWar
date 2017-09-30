@@ -62,6 +62,54 @@
 		</Effects>
 	</Definition>
 
+	<Definition xsi:type="MyObjectBuilder_UpgradeModuleDefinition">
+      <Id>
+        <TypeId>UpgradeModule</TypeId>
+        <SubtypeId>EWRadarSearchRotating</SubtypeId>
+      </Id>
+      <DisplayName>Long-Range Search Radar</DisplayName>
+      <Icon>Textures\GUI\Icons\Cubes\antenna.dds</Icon>
+      <CubeSize>Large</CubeSize>
+      <BlockTopology>TriangleMesh</BlockTopology>
+      <Size x="1" y="6" z="2" />
+      <ModelOffset x="0" y="0" z="0" />
+      <Model>Models\Cubes\Large\antenna.mwm</Model>
+      <Components>
+        <Component Subtype="SteelPlate" Count="65" />
+        <Component Subtype="Construction" Count="30" />
+        <Component Subtype="SmallTube" Count="60" />
+        <Component Subtype="LargeTube" Count="40" />
+        <Component Subtype="Computer" Count="8" />
+        <Component Subtype="RadioCommunication" Count="40" />
+        <Component Subtype="Construction" Count="10" />
+        <Component Subtype="SteelPlate" Count="15" />
+      </Components>
+      <CriticalComponent Subtype="RadioCommunication" Index="0" />
+      <MountPoints>
+        <MountPoint Side="Bottom" ExclusionMask="1" PropertiesMask="2" StartX="0" StartY="0" EndX="1" EndY="2" />
+      </MountPoints>
+      <BuildProgressModels>
+        <Model BuildPercentUpperBound="0.33" File="Models\Cubes\Large\AntennaConstruction_1.mwm" />
+        <Model BuildPercentUpperBound="0.66" File="Models\Cubes\Large\AntennaConstruction_2.mwm" />
+        <Model BuildPercentUpperBound="1.00" File="Models\Cubes\Large\AntennaConstruction_3.mwm" />
+      </BuildProgressModels>
+      <BlockPairName>EWRotatingRadar</BlockPairName>
+      <EdgeType>Light</EdgeType>
+      <ResourceSinkGroup>Utility</ResourceSinkGroup>
+      <BuildTimeSeconds>50</BuildTimeSeconds>
+      <MirroringY>Z</MirroringY>
+	  <MirroringZ>Y</MirroringZ>
+      <DamageEffectId>214</DamageEffectId>
+      <DamagedSound>ParticleElectrical</DamagedSound>
+	    <Effects>
+        <Effect Name="Damage" ParameterMin="0">
+          <ParticleEffects>
+            <ParticleEffect Origin="Electricity_Antenna" Name="Damage_Electrical_Damaged_Antenna" Loop="true" SpawnTimeMin="2" SpawnTimeMax="3" />
+          </ParticleEffects>
+        </Effect>
+      </Effects>
+    </Definition>
+
 	<!-- End Radars -->
 
 	<!-- Begin Radar Controllers -->
@@ -112,7 +160,7 @@
 
 	<!-- Begin Jammers -->
 
-	<Definition xsi:type="MyObjectBuilder_RadioAntennaDefinition">
+	<!--<Definition xsi:type="MyObjectBuilder_RadioAntennaDefinition">
       <Id>
         <TypeId>RadioAntenna</TypeId>
         <SubtypeId>EWJammerOmni</SubtypeId>
@@ -158,7 +206,7 @@
           </ParticleEffects>
         </Effect>
       </Effects>
-    </Definition>
+    </Definition>-->
 
 	<!-- End Jammers -->
 
