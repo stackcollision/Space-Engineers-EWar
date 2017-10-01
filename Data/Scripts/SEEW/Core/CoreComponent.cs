@@ -66,7 +66,12 @@ namespace SEEW.Core {
 					MyAPIGateway.TerminalControls.CustomControlGetter += ControlGetter;
 
 					// Register message handlers
-					//MyAPIGateway.Multiplayer.RegisterMessageHandler(Constants.MIDRadarSettings, HandleRadarSettings);
+					if(Helpers.IsServer) {
+						MyAPIGateway.Multiplayer.RegisterMessageHandler(Constants.MIDUpdateRadarSettingsServer, HandleUpdateRadarSettings);
+						MyAPIGateway.Multiplayer.RegisterMessageHandler(Constants.MIDGetRadarSettingsServer, HandleGetRadarSettings);
+					} else {
+						MyAPIGateway.Multiplayer.RegisterMessageHandler(Constants.MIDUpdateRadarSettings, HandleUpdateRadarSettings);
+					}
 
 					_logger.debugLog("Initialized", "UpdateBeforeSimulation");
 					_logger.debugLog("IsServer = " + Helpers.IsServer, "UpdateBeforeSimulation");
@@ -122,7 +127,7 @@ namespace SEEW.Core {
 			rangeSlider.Setter = (block, value) => {
 				RadarController controller = block.GameLogic.GetAs<RadarController>();
 				controller.SetRange((int)value);
-				//SendRadarSystemSettings(block.CubeGrid.EntityId);
+				SendRadarSettings(block.EntityId);
 			};
 			rangeSlider.Writer = (block, str) => {
 				RadarController controller = block.GameLogic.GetAs<RadarController>();
@@ -143,7 +148,7 @@ namespace SEEW.Core {
 			freqSlider.Setter = (block, value) => {
 				RadarController controller = block.GameLogic.GetAs<RadarController>();
 				controller.SetFreq(value);
-				//SendRadarSystemSettings(block.CubeGrid.EntityId);
+				SendRadarSettings(block.EntityId);
 			};
 			freqSlider.Writer = (block, str) => {
 				RadarController controller = block.GameLogic.GetAs<RadarController>();
@@ -165,7 +170,7 @@ namespace SEEW.Core {
 			unassignedList.ListContent = (block, items, selected) => {
 				RadarController controller 
 					= block.GameLogic.GetAs<RadarController>();
-				IEnumerable<RadarController.Radar> available 
+				List<RadarController.Radar> available 
 					= controller.GetAvailableRadars();
 
 				foreach (RadarController.Radar r in available) {
@@ -175,7 +180,6 @@ namespace SEEW.Core {
 								MyStringId.GetOrCompute(r.type.ToString()),
 								r
 							);
-					_logger.debugLog($"Adding to list: {item.Text}", "ListContent");
 					items.Add(item);
 				}
 			};
@@ -268,52 +272,68 @@ namespace SEEW.Core {
 		#endregion
 
 		#region Message Handlers
-		/*private void SendRadarSettings(long block) {
-			RadarManager radar = RadarManager.GetForGrid(grid);
+		private void SendRadarSettings(long block) {
+			try {
+				RadarController controller = RadarController.GetForBlock(block);
 
-			Message<long, RadarSystemSettings> msg
-				= new Message<long, RadarSystemSettings>(grid, radar.GetRadarSettings());
+				Message<long, RadarSettings> msg
+					= new Message<long, RadarSettings>(block, controller.GetRadarSettings());
 
-			if(Helpers.IsServer) {
-				logger.debugLog($"RadarSystemSettings -> Clients for grid {grid}", "SendRadarSystemSettings");
-				MyAPIGateway.Multiplayer.SendMessageToOthers(
-					Constants.MIDRadarSettings,
-					msg.ToXML());
-			} else {
-				logger.debugLog($"RadarSystemSettings -> Server for grid {grid}", "SendRadarSystemSettings");
-				MyAPIGateway.Multiplayer.SendMessageToServer(
-					Constants.MIDRadarSettings,
-					msg.ToXML());
+				if (Helpers.IsServer) {
+					_logger.debugLog($"RadarSystemSettings -> Clients for block {block}", "SendRadarSettings");
+					MyAPIGateway.Multiplayer.SendMessageToOthers(
+						Constants.MIDUpdateRadarSettings,
+						msg.ToXML());
+				} else {
+					_logger.debugLog($"RadarSystemSettings -> Server for block {block}", "SendRadarSettings");
+					MyAPIGateway.Multiplayer.SendMessageToServer(
+						Constants.MIDUpdateRadarSettingsServer,
+						msg.ToXML());
+				}
+			} catch(Exception e) {
+				_logger.log(Logger.severity.ERROR, "SendRadarSettings",
+					"Exception caught: " + e.ToString());
 			}
 		}
 
-		private void HandleRadarSettings(byte[] data) {
+		private void HandleUpdateRadarSettings(byte[] data) {
 			try {
-				Message<long, RadarSystemSettings> msg
-					= Message<long, RadarSystemSettings>.FromXML(data);
+				Message<long, RadarSettings> msg
+					= Message<long, RadarSettings>.FromXML(data);
 				if (msg == null)
-					logger.debugLog("Msg is null", "HandleRadarSystemSettings");
+					return;
 
-				logger.debugLog($"Got radar settings update for grid {msg.Key}", "HandleRadarSystemSettings");
+				_logger.debugLog($"Got radar settings update for block {msg.Key}", "HandleUpdateRadarSettings");
 
-				VRage.ModAPI.IMyEntity ent = MyAPIGateway.Entities.GetEntityById(msg.Key);
-				if(ent == null)
-					logger.debugLog($"No Entity with ID {msg.Key} found", "HandleRadarSystemSettings");
-
-				RadarManager radar = RadarManager.GetForGrid(msg.Key);
-				if(radar == null)
-					logger.debugLog("Radar is null", "HandleRadarSystemSettings");
+				RadarController controller = RadarController.GetForBlock(msg.Key);
 				if (msg.Value == null)
-					logger.debugLog("Value is null", "HandleRadarSystemSettings");
-				radar.UpdateRadarSettings(msg.Value);
+					_logger.debugLog("Value is null", "HandleUpdateRadarSettings");
+				controller.UpdateRadarSettings(msg.Value);
 
 				if (Helpers.IsServer)
-					SendRadarSystemSettings(msg.Key);
+					SendRadarSettings(msg.Key);
 			} catch(Exception e) {
-				logger.log(Logger.severity.ERROR, "HandleRadarSystemSettings",
+				_logger.log(Logger.severity.ERROR, "HandleUpdateRadarSettings",
 					"Exception caught: " + e.ToString());
 			}
-		}*/
+		}
+
+		private void HandleGetRadarSettings(byte[] data) {
+			try {
+				Message<long, long> msg
+					= Message<long, long>.FromXML(data);
+				if (msg == null)
+					return;
+
+				_logger.debugLog($"Got radar settings request for block {msg.Key}", "HandleGetRadarSettings");
+
+				SendRadarSettings(msg.Key);
+
+			} catch (Exception e) {
+				_logger.log(Logger.severity.ERROR, "HandleGetRadarSettings",
+					"Exception caught: " + e.ToString());
+			}
+		}
 		#endregion
 
 		#region Helpers

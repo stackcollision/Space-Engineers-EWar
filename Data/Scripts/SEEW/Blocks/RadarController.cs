@@ -86,7 +86,7 @@ namespace SEEW.Blocks {
 
 			_grid = (Entity as IMyCubeBlock).CubeGrid;
 			_logger = new Logger(_grid.EntityId.ToString(), "RadarController");
-
+			
 			this.NeedsUpdate |= VRage.ModAPI.MyEntityUpdateEnum.EACH_100TH_FRAME;
 			this.NeedsUpdate |= MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
 			_grid.OnBlockAdded += BlockAdded;
@@ -114,6 +114,14 @@ namespace SEEW.Blocks {
 			_grid.OnBlockRemoved -= BlockRemoved;
 
 			base.Close();
+		}
+
+		public static RadarController GetForBlock(long entityId) {
+			IMyEntity ent = MyAPIGateway.Entities.GetEntityById(entityId);
+			if (ent == null)
+				return null;
+
+			return ent.GameLogic.GetAs<RadarController>();
 		}
 		#endregion
 
@@ -196,7 +204,7 @@ namespace SEEW.Blocks {
 					_logger.log(Logger.severity.ERROR, "BlockRemoved",
 						"Radar block removed but was not found in list.");
 				}
-
+				
 				RecalculateSectorCoverage();
 				ReclassifySystem();
 			}
@@ -358,12 +366,12 @@ namespace SEEW.Blocks {
 		/// to a radar system
 		/// </summary>
 		/// <returns></returns>
-		public IEnumerable<Radar> GetAvailableRadars() {
+		public List<Radar> GetAvailableRadars() {
 			_logger.log($"There are {_allRadars.Count} radars on this grid", "GetAvailableRadars");
 			return _allRadars.Where((radar) => {
 				RadarBlock r = radar.radarBlock;
 				return !r.isAssigned;
-			});
+			}).ToList();
 		}
 
 		/// <summary>
@@ -378,19 +386,14 @@ namespace SEEW.Blocks {
 		/// Assigns a radar to this system
 		/// </summary>
 		/// <param name="radar"></param>
-		/// <param name="loading">Set to true when initially loading
-		/// the world.  If this is set to true, assigning the block
-		/// will not modify the list of assigned IDs which will be saved.</param>
-		public void AssignRadar(Radar radar, bool loading = false) {
+		public void AssignRadar(Radar radar) {
 			if (IsRadarCompatible(radar)) {
 				_assignedRadars.Add(radar);
 				radar.radarBlock.isAssigned = true;
 
-				if (loading == false) {
-					_settings.assignedIds.Add(radar.entID);
-					SaveRadarSettings();
-				}
-
+				_settings.assignedIds.Add(radar.entID);
+				SaveRadarSettings();
+				
 				RecalculateSectorCoverage();
 				ReclassifySystem();
 			}
@@ -449,6 +452,31 @@ namespace SEEW.Blocks {
 		public void SetFreq(float freq) {
 			_settings.frequency = (float)Math.Round(freq, 1);
 			SaveRadarSettings();
+		}
+
+		public RadarSettings GetRadarSettings() {
+			return _settings;
+		}
+
+		public void UpdateRadarSettings(RadarSettings updated) {
+			_logger.debugLog("Updating settings", "UpdateRadarSettings");
+
+			// Process assginments
+			List<long> unassign = _settings.assignedIds.Except(updated.assignedIds).ToList();
+			List<long> assign = updated.assignedIds.Except(_settings.assignedIds).ToList();
+			foreach(Radar r in _allRadars) {
+				if(unassign.Contains(r.entID)) {
+					UnassignedRadar(r);
+				} else if(assign.Contains(r.entID)) {
+					AssignRadar(r);
+				}
+			}
+
+			_settings.range = updated.range;
+			_settings.frequency = updated.frequency;
+
+			RecalculateSectorCoverage();
+			ReclassifySystem();
 		}
 		#endregion
 
@@ -589,7 +617,7 @@ namespace SEEW.Blocks {
 
 			Entity.Storage[Constants.GUIDRadarSettings]
 				= MyAPIGateway.Utilities.SerializeToXML<RadarSettings>(_settings);
-			_logger.debugLog("Saved", "SaveRadarSettings");
+			//_logger.debugLog("Saved", "SaveRadarSettings");
 		}
 
 		/// <summary>
@@ -602,20 +630,18 @@ namespace SEEW.Blocks {
 				if (Entity.Storage.ContainsKey(Constants.GUIDRadarSettings)) {
 
 					_logger.debugLog("Loading saved radar settings: " + Entity.Storage[Constants.GUIDRadarSettings], "LoadSavedData");
-					_settings = MyAPIGateway.Utilities.SerializeFromXML<RadarSettings>(Entity.Storage[Constants.GUIDRadarSettings]);
+					RadarSettings settings = MyAPIGateway.Utilities.SerializeFromXML<RadarSettings>(Entity.Storage[Constants.GUIDRadarSettings]);
 
-					// Process assignments
-					foreach (Radar r in _allRadars) {
-						if (_settings.assignedIds.Contains(r.block.FatBlock.EntityId)) {
-							AssignRadar(r, true);
-						}
-					}
-					RecalculateSectorCoverage();
-					ReclassifySystem();
+					UpdateRadarSettings(settings);
 
 				}
 			} else {
-				// TODO
+				_logger.debugLog("Getting radar settings from server", "LoadSavedData");
+				Message<long, long> request
+					= new Message<long, long>(Entity.EntityId, 0);
+				MyAPIGateway.Multiplayer.SendMessageToServer(
+					Constants.MIDGetRadarSettingsServer,
+					request.ToXML());
 			}
 		}
 		#endregion
