@@ -105,7 +105,7 @@ namespace SEEW.Blocks {
 			base.Init(objectBuilder);
 
 			_grid = (Entity as IMyCubeBlock).CubeGrid;
-			_logger = new Logger(_grid.EntityId.ToString(), "RadarController");
+			_logger = new Logger(Entity.EntityId.ToString(), "RadarController");
 			
 			this.NeedsUpdate |= VRage.ModAPI.MyEntityUpdateEnum.EACH_100TH_FRAME;
 			this.NeedsUpdate |= MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
@@ -130,6 +130,11 @@ namespace SEEW.Blocks {
 		}
 
 		public override void Close() {
+			if (_remoteSweepTimer != null)
+				_remoteSweepTimer.Stop();
+			if (_trackSweepTimer != null)
+				_trackSweepTimer.Stop();
+
 			_grid.OnBlockAdded -= BlockAdded;
 			_grid.OnBlockRemoved -= BlockRemoved;
 
@@ -172,11 +177,6 @@ namespace SEEW.Blocks {
 			}
 		}
 
-		/*public override void UpdateBeforeSimulation100() {
-			if(_assignedRadars.Count > 0) {
-				DoRemoteSweep();
-			}
-		}*/
 		#endregion
 
 		#region SE Hooks - Block Added
@@ -259,6 +259,23 @@ namespace SEEW.Blocks {
 		}
 		#endregion
 
+		#region SE Hooks - Entity OnClose
+		/// <summary>
+		/// Called when an entity we are tracking goes outside the streaming
+		/// range.  It will continue to be tracked via the values sent by the
+		/// server.
+		/// </summary>
+		/// <param name="ent"></param>
+		private void TrackedEntityUnloaded(IMyEntity ent) {
+			// Find the entity in the tracks list
+			Track track;
+			if(_allTracks.TryGetValue(ent.EntityId, out track)) {
+				_logger.debugLog($"Entity associated with Track {track.trackId} has been lost", "TrackedEntityUnloaded");
+				track.ent = null;
+			}
+		}
+		#endregion
+
 		#region Sweep 
 		/// <summary>
 		/// 
@@ -313,18 +330,22 @@ namespace SEEW.Blocks {
 		/// contacts from the list.  That can only be done in ProcessAcquiredContacts.
 		/// </summary>
 		private void DoTrackingSweep() {
+			//_logger.debugLog("Beginning sweep", "DoTrackingSweep");
 
 			Vector3D myPos = _grid.WorldAABB.Center;
 
 			// Go through all current tracks and update their makers
-			foreach(KeyValuePair<long, Track> t in _allTracks) {
+			foreach(KeyValuePair<long, Track> t in _allTracks) { 
 
 				Track track = t.Value;
+
+				//_logger.debugLog($"For Track {track.trackId}", "DoTrackingSweep");
 
 				// If the entity is null, this track is only available on the
 				// server so use the stored value.  Otherwise get the most
 				// up to date value
-				if(track.ent != null) {
+				if (track.ent != null) {
+					//_logger.debugLog("Entity is not null", "DoTrackingSweep");
 					track.position = track.ent.WorldAABB.Center;
 				}
 
@@ -337,6 +358,7 @@ namespace SEEW.Blocks {
 				//Check that the sector is covered by our radars
 				Sector sec = SectorExtensions.ClassifyVector(relative);
 				if (IsSectorBlind(sec)) {
+					//_logger.debugLog("Sector is blind", "DoTrackingSweep");
 					// If a contact is not trackable, clear its GPS marker
 					ClearTrackMarker(track);
 					continue;
@@ -357,6 +379,7 @@ namespace SEEW.Blocks {
 					= EWMath.MinimumXSection(
 						Constants.radarBeamWidths[(int)_assignedType], range);
 				if (track.xsec < minxsec) {
+					//_logger.debugLog("Cross-section not large enough", "DoTrackingSweep");
 					ClearTrackMarker(track);
 					continue;
 				}
@@ -517,6 +540,7 @@ namespace SEEW.Blocks {
 						if(oldTrack.ent == null) {
 							oldTrack.ent = MyAPIGateway.Entities.GetEntityById(c.entId);
 							if(oldTrack.ent != null) {
+								oldTrack.ent.OnClose += TrackedEntityUnloaded;
 								_logger.debugLog($"Entity associated with Track {oldTrack.trackId} is now available on the client", "ProcessAcquiredContacts");
 							}
 						}
@@ -535,6 +559,9 @@ namespace SEEW.Blocks {
 							position = c.pos,
 							xsec = c.xsec
 						};
+
+						if (newTrack.ent != null)
+							newTrack.ent.OnClose += TrackedEntityUnloaded;
 
 						_logger.debugLog($"Picked up new Track {id}, associated entity is " + 
 							(newTrack.ent == null ? "null" : "not null") , "ProcessAcquiredContacts");
@@ -638,6 +665,7 @@ namespace SEEW.Blocks {
 			string title = $"~Track {t.trackId} ({(int)t.xsec}m²)~";
 
 			if (t.gps == null) {
+				//_logger.debugLog("Creating new GPS marker", "AddUpdateTrackMarker");
 				t.gps = MyAPIGateway.Session.GPS.Create(
 							title, "Radar Track",
 							t.position, true, true);
@@ -648,6 +676,7 @@ namespace SEEW.Blocks {
 					t.gps.Name,
 					Constants.Color_RadarContact);*/
 			} else {
+				//_logger.debugLog("Updating existing GPS marker", "AddUpdateTrackMarker");
 				t.gps.Coords = t.position;
 				t.gps.Name = title;
 			}
@@ -658,9 +687,6 @@ namespace SEEW.Blocks {
 		/// </summary>
 		/// <param name="t"></param>
 		private void ClearTrackMarker(Track t) {
-			if (MyAPIGateway.Session == null)
-				return;
-
 			if (t.gps != null) {
 				MyAPIGateway.Session.GPS.RemoveLocalGps(t.gps);
 				t.gps = null;
@@ -748,7 +774,7 @@ namespace SEEW.Blocks {
 
 			Entity.Storage[Constants.GUIDRadarSettings]
 				= MyAPIGateway.Utilities.SerializeToXML<RadarSettings>(_settings);
-			//_logger.debugLog("Saved", "SaveRadarSettings");
+			_logger.debugLog("Saved", "SaveRadarSettings");
 		}
 
 		/// <summary>

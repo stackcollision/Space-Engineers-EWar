@@ -347,6 +347,8 @@ namespace SEEW.Core {
 				if (msg == null)
 					return;
 
+				_logger.debugLog($"Got acquired contacts for block {msg.Key}", "HandleAcquisitionSweep");
+
 				RadarController controller = RadarController.GetForBlock(msg.Key);
 				if (controller == null) {
 					_logger.debugLog("Controller is null", "HandleAcquisitionSweep");
