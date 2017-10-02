@@ -16,6 +16,7 @@ namespace SEEW {
 		public const ushort MIDUpdateRadarSettings = 55000;
 		public const ushort MIDUpdateRadarSettingsServer = 55001;
 		public const ushort MIDGetRadarSettingsServer = 55002;
+		public const ushort MIDAcquisitionSweep = 55003;
 
 		/// <summary>
 		/// Color of radar contact beacons

@@ -69,8 +69,13 @@ namespace SEEW.Core {
 					if(Helpers.IsServer) {
 						MyAPIGateway.Multiplayer.RegisterMessageHandler(Constants.MIDUpdateRadarSettingsServer, HandleUpdateRadarSettings);
 						MyAPIGateway.Multiplayer.RegisterMessageHandler(Constants.MIDGetRadarSettingsServer, HandleGetRadarSettings);
+
+						if (!Helpers.IsDedicated) {
+							MyAPIGateway.Multiplayer.RegisterMessageHandler(Constants.MIDAcquisitionSweep, HandleAcquisitionSweep);
+						}
 					} else {
 						MyAPIGateway.Multiplayer.RegisterMessageHandler(Constants.MIDUpdateRadarSettings, HandleUpdateRadarSettings);
+						MyAPIGateway.Multiplayer.RegisterMessageHandler(Constants.MIDAcquisitionSweep, HandleAcquisitionSweep);
 					}
 
 					_logger.debugLog("Initialized", "UpdateBeforeSimulation");
@@ -306,8 +311,8 @@ namespace SEEW.Core {
 				_logger.debugLog($"Got radar settings update for block {msg.Key}", "HandleUpdateRadarSettings");
 
 				RadarController controller = RadarController.GetForBlock(msg.Key);
-				if (msg.Value == null)
-					_logger.debugLog("Value is null", "HandleUpdateRadarSettings");
+				if (controller == null)
+					return; // Controller not streamed to us
 				controller.UpdateRadarSettings(msg.Value);
 
 				if (Helpers.IsServer)
@@ -331,6 +336,27 @@ namespace SEEW.Core {
 
 			} catch (Exception e) {
 				_logger.log(Logger.severity.ERROR, "HandleGetRadarSettings",
+					"Exception caught: " + e.ToString());
+			}
+		}
+
+		private void HandleAcquisitionSweep(byte[] data) {
+			try {
+				Message<long, List<RadarController.RemoteContact>> msg
+					= Message<long, List<RadarController.RemoteContact>>.FromXML(data);
+				if (msg == null)
+					return;
+
+				RadarController controller = RadarController.GetForBlock(msg.Key);
+				if (controller == null) {
+					_logger.debugLog("Controller is null", "HandleAcquisitionSweep");
+					return;
+				}
+
+				controller.ProcessAcquiredContacts(msg.Value);
+
+			} catch(Exception e) {
+				_logger.log(Logger.severity.ERROR, "HandleAcquisitionSweep",
 					"Exception caught: " + e.ToString());
 			}
 		}

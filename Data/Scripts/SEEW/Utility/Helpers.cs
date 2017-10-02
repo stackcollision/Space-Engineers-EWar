@@ -22,5 +22,11 @@ namespace SEEW.Utility {
 			}
 		}
 
+		public static bool IsDedicated {
+			get {
+				return MyAPIGateway.Utilities.IsDedicated;
+			}
+		}
+
 	}
 }

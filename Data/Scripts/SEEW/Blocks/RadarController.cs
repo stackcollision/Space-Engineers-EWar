@@ -16,6 +16,10 @@ using SEEW.Utility;
 using Sandbox.Game;
 using Sandbox.Game.World;
 using Sandbox.Game.EntityComponents;
+using Sandbox.Game.Entities;
+using Sandbox.Definitions;
+using VRage.Game;
+using VRage.Library.Utils;
 
 namespace SEEW.Blocks {
 
@@ -23,7 +27,7 @@ namespace SEEW.Blocks {
 	/// The central control block which manages the radar system
 	/// </summary>
 	[MyEntityComponentDescriptor(typeof(MyObjectBuilder_UpgradeModule), false, "EWControllerRadar")]
-	class RadarController : MyGameLogicComponent {
+	public class RadarController : MyGameLogicComponent {
 
 		#region Structs and Enums
 		/// <summary>
@@ -31,9 +35,22 @@ namespace SEEW.Blocks {
 		/// </summary>
 		private class Track {
 			public bool lost;
+
 			public IMyEntity ent;
-			public IMyGps gps;
 			public string trackId;
+			public IMyGps gps;
+
+			public Vector3D position;
+			public double xsec;
+		}
+
+		/// <summary>
+		/// A contact sent by the server, contains only basic information
+		/// </summary>
+		public class RemoteContact {
+			public long entId;
+			public Vector3D pos;
+			public double xsec;
 		}
 
 		/// <summary>
@@ -74,6 +91,9 @@ namespace SEEW.Blocks {
 		private Sector _coverage = Sector.NONE;
 
 		private RadarSettings _settings = new RadarSettings();
+
+		private MyTimer _remoteSweepTimer;
+		private MyTimer _trackSweepTimer;
 		#endregion
 
 		#region Lifecycle
@@ -132,15 +152,31 @@ namespace SEEW.Blocks {
 					Entity.Storage = new MyModStorageComponent();
 				LoadSavedData();
 
+				
+				if(Helpers.IsServer) {
+					// The server will do an acquisition sweep and push results
+					// to the clients
+					_remoteSweepTimer = new MyTimer(5000, DoAcquisitionSweep);
+					_remoteSweepTimer.Start();
+				} 
+
+				if(!Helpers.IsServer || !Helpers.IsDedicated) {
+					// Determines how often collected tracks are updated
+					_trackSweepTimer = new MyTimer(1000, DoTrackingSweep);
+					_trackSweepTimer.Start();
+				}
+
 				_initialized = true;
+
+				_logger.debugLog("Initialized", "UpdateOnceBeforeFrame");
 			}
 		}
 
-		public override void UpdateBeforeSimulation100() {
+		/*public override void UpdateBeforeSimulation100() {
 			if(_assignedRadars.Count > 0) {
-				DoSweep();
+				DoRemoteSweep();
 			}
-		}
+		}*/
 		#endregion
 
 		#region SE Hooks - Block Added
@@ -224,139 +260,114 @@ namespace SEEW.Blocks {
 		#endregion
 
 		#region Sweep 
-		/// <summary> 
-		/// Runs a radar sweep for the attached grid. 
-		/// </summary> 
-		private void DoSweep() {
-			//logger.debugLog("Beginning sweep", "UpdateBeforeSimulation100"); 
+		/// <summary>
+		/// 
+		/// SERVER ONLY FUNCTION
+		/// 
+		/// Server will periodically determine which contacts are near a grid
+		/// with radar and send them out in a message.  This is a workaround
+		/// for the fact that not all entities within radar range may be 
+		/// streamed to the client.
+		/// </summary>
+		private void DoAcquisitionSweep() {
+			_logger.debugLog("Running acquisition sweep", "DoAcquisitionSweep");
 
-			Vector3D position = _grid.GetPosition();
+			Vector3D pos = _grid.GetPosition();
 
-			// new, maintained, lost 
-			int n = 0, m = 0, l = 0;
-
-			// Invalidate all current tracks.  If these are still invalid 
-			// at the end of the sweep, we will know which contacts are lost. 
-			foreach (KeyValuePair<long, Track> t in _allTracks) {
-				t.Value.lost = true;
-			}
-
-			// Find all entities within the range 
-			// TODO: Make range configurable via antenna properties 
 			VRageMath.BoundingSphereD sphere
-			  = new VRageMath.BoundingSphereD(position, _settings.range);
+			  = new VRageMath.BoundingSphereD(pos, _settings.range);
 			List<IMyEntity> ents
 			  = MyAPIGateway.Entities.GetEntitiesInSphere(ref sphere);
 
-			foreach (IMyEntity e in ents) {
+			List<RemoteContact> contacts = new List<RemoteContact>();
+
+			foreach(IMyEntity e in ents) {
 				if (e == _grid)
 					continue;
 
-				// Radar will only pick up grids 
-				if (e is IMyCubeGrid) {
-					Vector3D epos = e.WorldAABB.Center;
+				if(e is IMyCubeGrid) {
+					Vector3D vecTo = e.GetPosition() - pos;
 
-					// Transform the coordinates into grid space so we 
-					// can compare it against our radar coverage 
-					VRageMath.Vector3D relative
-					  = VRageMath.Vector3D.Transform(
-						epos, _grid.WorldMatrixNormalizedInv);
-
-					//Check that the sector is covered by our radars
-					Sector sec = SectorExtensions.ClassifyVector(relative);
-					if (IsSectorBlind(sec))
-						continue;
-
-					Vector3D targetPos = e.GetPosition();
-					Vector3D myPos = _grid.GetPosition();
-
-					// Check that the contact is large enough for us to see
-					// Do this by comparing the radar cross-section to the
-					// minimum cross-section the radar is capable of seeing at
-					// this range
-					Vector3D vecTo = targetPos - myPos;
-					double xsec 
-						= EWMath.DetermineXSection(e as IMyCubeGrid, vecTo);
-					double range = vecTo.Length();
-					double minxsec
-						= EWMath.MinimumXSection(
-							Constants.radarBeamWidths[(int)_assignedType], range);
-					//logger.debugLog($"Minimum xsec at range {range} is {minxsec}", "DoSweep");
-					//logger.debugLog($"Contact xsec is {xsec} and minimum is {minxsec}", "DoSweep");
-					if (xsec < minxsec)
-						continue;
-
-					// Check if there is something between the radar
-					// and the contact
-					vecTo.Normalize();
-					Vector3D castPosition = myPos + (vecTo * _grid.LocalAABB.Size * 1.2);
-					// TODO: CastRay inefficient over long distances
-					//if (range <= 100) {
-					IHitInfo hit;
-					if (MyAPIGateway.Physics.CastRay(castPosition, targetPos, out hit)) {
-						if (hit.HitEntity != e) {
-							//logger.debugLog($"Contact {e.EntityId} obscured by {hit.HitEntity.EntityId}", "DoSweep");
-							continue;
-						}
-					}
-					/*} else {
-
-					}*/
-
-					// If all previous checks passed, we can track it 
-					// Check if this contact is already in the tracks dictionary 
-					Track oldTrack = null;
-					if (_allTracks.TryGetValue(e.EntityId, out oldTrack)) {
-						m++;
-						oldTrack.gps.Coords = epos;
-						oldTrack.gps.Name
-							= $"~Track {oldTrack.trackId} ({(int)xsec}m²)~";
-						oldTrack.lost = false;
-					} else {
-						n++;
-
-						string id = e.EntityId.ToString();
-						id = id.Substring(Math.Max(0, id.Length - 5));
-
-						Track newTrack = new Track() {
-							lost = false,
-							ent = e,
-							gps = MyAPIGateway.Session.GPS.Create(
-							$"~Track {id} ({(int)xsec}m²)~", "Radar Track",
-							epos, true, true),
-							trackId = id
-						};
-
-						MyAPIGateway.Session.GPS.AddLocalGps(newTrack.gps);
-
-						MyVisualScriptLogicProvider.SetGPSColor(
-							newTrack.gps.Name,
-							Constants.Color_RadarContact);
-
-						_allTracks.Add(e.EntityId, newTrack);
-					}
+					contacts.Add(new RemoteContact() {
+						entId = e.EntityId,
+						pos = e.WorldAABB.Center,
+						xsec = EWMath.DetermineXSection(e as IMyCubeGrid, vecTo)
+					});
 				}
 			}
 
-			// Check which tracks were not marked valid during this sweep 
-			// and prune them 
-			List<long> remove = new List<long>();
-			foreach (KeyValuePair<long, Track> t in _allTracks) {
-				if (t.Value.lost) {
-					// Remove the GPS 
-					MyAPIGateway.Session.GPS.RemoveLocalGps(t.Value.gps);
+			// Send the contact list, even if it is blank.  This is how the
+			// client will know when distant contacts have gone out of range
+			// or disappeared.
+			_logger.debugLog($"List<RemoteContact> -> Clients with {contacts.Count} entities", "DoAcquisitionSweep");
+			Message<long, List<RemoteContact>> msg
+				= new Message<long, List<RemoteContact>>(Entity.EntityId, contacts);
+			MyAPIGateway.Multiplayer.SendMessageToOthers(
+				Constants.MIDAcquisitionSweep,
+				msg.ToXML());
+		}
 
-					// Add to prune list 
-					remove.Add(t.Key);
-					l++;
+		/// <summary>
+		/// Goes through all tracks in the list and determines whether or not
+		/// they can currently be seen.  This function does not add or remove
+		/// contacts from the list.  That can only be done in ProcessAcquiredContacts.
+		/// </summary>
+		private void DoTrackingSweep() {
+
+			Vector3D myPos = _grid.WorldAABB.Center;
+
+			// Go through all current tracks and update their makers
+			foreach(KeyValuePair<long, Track> t in _allTracks) {
+
+				Track track = t.Value;
+
+				// If the entity is null, this track is only available on the
+				// server so use the stored value.  Otherwise get the most
+				// up to date value
+				if(track.ent != null) {
+					track.position = track.ent.WorldAABB.Center;
 				}
-			}
-			foreach (long r in remove) {
-				_allTracks.Remove(r);
+
+				// Transform the coordinates into grid space so we 
+				// can compare it against our radar coverage 
+				VRageMath.Vector3D relative
+				  = VRageMath.Vector3D.Transform(
+					track.position, _grid.WorldMatrixNormalizedInv);
+
+				//Check that the sector is covered by our radars
+				Sector sec = SectorExtensions.ClassifyVector(relative);
+				if (IsSectorBlind(sec)) {
+					// If a contact is not trackable, clear its GPS marker
+					ClearTrackMarker(track);
+					continue;
+				}
+
+				// Vector to target
+				Vector3D vecTo = track.position - myPos;
+
+				// If the entity is available, calculate the cross-section
+				// Otherwise we will use the stored value from the server
+				if (track.ent != null) {
+					track.xsec 
+						= EWMath.DetermineXSection(track.ent as IMyCubeGrid, vecTo);
+				}
+
+				double range = vecTo.Length();
+				double minxsec
+					= EWMath.MinimumXSection(
+						Constants.radarBeamWidths[(int)_assignedType], range);
+				if (track.xsec < minxsec) {
+					ClearTrackMarker(track);
+					continue;
+				}
+
+				// TODO: raycast
+
+				// If all of the previous checks passed, this contact should
+				// be visible with a marker
+				AddUpdateTrackMarker(track);
 			}
 
-			//logger.debugLog( 
-			//$"Track Summary: {n} new, {m} maintained, {l} lost", "DoSweep"); 
 		}
 		#endregion
 
@@ -478,6 +489,87 @@ namespace SEEW.Blocks {
 			RecalculateSectorCoverage();
 			ReclassifySystem();
 		}
+
+		public void ProcessAcquiredContacts(List<RemoteContact> contacts) {
+			try {
+				int n = 0, m = 0, l = 0;
+				 
+				// Invalidate all current tracks.  If these are still invalid 
+				// at the end of the sweep, we will know which contacts are lost. 
+				foreach (KeyValuePair<long, Track> t in _allTracks) {
+					t.Value.lost = true;
+				}
+
+				foreach(RemoteContact c in contacts) {
+					
+					Track oldTrack = null;
+					if (_allTracks.TryGetValue(c.entId, out oldTrack)) {
+						m++;
+
+						// This is an object we are already tracking
+						// Update its values
+						oldTrack.position = c.pos;
+						oldTrack.xsec = c.xsec;
+						oldTrack.lost = false;
+						
+						// If the object wasn't loaded on the client, check
+						// if it is loaded now
+						if(oldTrack.ent == null) {
+							oldTrack.ent = MyAPIGateway.Entities.GetEntityById(c.entId);
+							if(oldTrack.ent != null) {
+								_logger.debugLog($"Entity associated with Track {oldTrack.trackId} is now available on the client", "ProcessAcquiredContacts");
+							}
+						}
+					} else {
+						// This is a new object to track
+						n++;
+
+						string id = c.entId.ToString();
+						id = id.Substring(Math.Max(0, id.Length - 5));
+
+						Track newTrack = new Track() {
+							lost = false,
+							ent = MyAPIGateway.Entities.GetEntityById(c.entId),
+							gps = null,
+							trackId = id,
+							position = c.pos,
+							xsec = c.xsec
+						};
+
+						_logger.debugLog($"Picked up new Track {id}, associated entity is " + 
+							(newTrack.ent == null ? "null" : "not null") , "ProcessAcquiredContacts");
+						_allTracks.Add(c.entId, newTrack);
+					}
+
+				}
+
+				// Check which tracks were not marked valid during this sweep 
+				// and prune them 
+				List<long> remove = new List<long>();
+				foreach (KeyValuePair<long, Track> t in _allTracks) {
+					if (t.Value.lost) {
+						l++;
+
+						// Remove the GPS 
+						if(t.Value.gps != null)
+							MyAPIGateway.Session.GPS.RemoveLocalGps(t.Value.gps);
+
+						// Add to prune list 
+						remove.Add(t.Key);
+					}
+				}
+				foreach (long r in remove) {
+					_allTracks.Remove(r);
+				}
+
+				_logger.debugLog(
+					$"Track Summary: {n} new, {m} maintained, {l} lost", "ProcessAcquiredContacts");
+
+			} catch (Exception e) {
+				_logger.log(Logger.severity.ERROR, "ProcessAcquiredContacts",
+					"Exception caught: " + e.ToString());
+			}
+		}
 		#endregion
 
 		#region Helpers
@@ -534,6 +626,45 @@ namespace SEEW.Blocks {
 				"DetermineAntennaSector");
 
 			return SectorExtensions.ClassifyVector(rotated);
+		}
+
+		/// <summary>
+		/// Updates (or creates a new, if the contact was previously not
+		/// visible) the marker on a track
+		/// </summary>
+		/// <param name="t"></param>
+		private void AddUpdateTrackMarker(Track t) {
+
+			string title = $"~Track {t.trackId} ({(int)t.xsec}m²)~";
+
+			if (t.gps == null) {
+				t.gps = MyAPIGateway.Session.GPS.Create(
+							title, "Radar Track",
+							t.position, true, true);
+
+				MyAPIGateway.Session.GPS.AddLocalGps(t.gps);
+
+				/*MyVisualScriptLogicProvider.SetGPSColor(
+					t.gps.Name,
+					Constants.Color_RadarContact);*/
+			} else {
+				t.gps.Coords = t.position;
+				t.gps.Name = title;
+			}
+		}
+
+		/// <summary>
+		/// Removes the marker from a track when it is not visible
+		/// </summary>
+		/// <param name="t"></param>
+		private void ClearTrackMarker(Track t) {
+			if (MyAPIGateway.Session == null)
+				return;
+
+			if (t.gps != null) {
+				MyAPIGateway.Session.GPS.RemoveLocalGps(t.gps);
+				t.gps = null;
+			}
 		}
 
 		/// <summary>
