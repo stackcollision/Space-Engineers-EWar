@@ -20,6 +20,8 @@ using Sandbox.Game.Entities;
 using Sandbox.Definitions;
 using VRage.Game;
 using VRage.Library.Utils;
+using VRage.Utils;
+using VRage;
 
 namespace SEEW.Blocks {
 
@@ -38,7 +40,7 @@ namespace SEEW.Blocks {
 
 			public IMyEntity ent;
 			public string trackId;
-			public IMyGps gps;
+			public MyAreaMarker marker;
 
 			public Vector3D position;
 			public double xsec;
@@ -167,13 +169,23 @@ namespace SEEW.Blocks {
 
 				if(!Helpers.IsServer || !Helpers.IsDedicated) {
 					// Determines how often collected tracks are updated
-					_trackSweepTimer = new MyTimer(1000, DoTrackingSweep);
+					_trackSweepTimer = new MyTimer(1000, () => { this.NeedsUpdate |= MyEntityUpdateEnum.BEFORE_NEXT_FRAME; });
 					_trackSweepTimer.Start();
 				}
+
+				/*MyAreaMarker marker = new MyAreaMarker(
+					new MyPositionAndOrientation(Entity.WorldMatrix),
+					new MyAreaMarkerDefinition() {
+						DisplayNameEnum = MyStringId.GetOrCompute("Test Marker"),
+						ColorHSV = Color.Red.ColorToHSV()
+					});
+				marker.AddHudMarker();*/
 
 				_initialized = true;
 
 				_logger.debugLog("Initialized", "UpdateOnceBeforeFrame");
+			} else {
+				DoTrackingSweep();
 			}
 		}
 
@@ -271,6 +283,10 @@ namespace SEEW.Blocks {
 			Track track;
 			if(_allTracks.TryGetValue(ent.EntityId, out track)) {
 				_logger.debugLog($"Entity associated with Track {track.trackId} has been lost", "TrackedEntityUnloaded");
+				if (track.marker != null) {
+					track.marker.Close();
+					track.marker = null;
+				}
 				track.ent = null;
 			}
 		}
@@ -289,7 +305,7 @@ namespace SEEW.Blocks {
 		private void DoAcquisitionSweep() {
 			_logger.debugLog("Running acquisition sweep", "DoAcquisitionSweep");
 
-			Vector3D pos = _grid.GetPosition();
+			Vector3D pos = _grid.WorldAABB.Center;
 
 			VRageMath.BoundingSphereD sphere
 			  = new VRageMath.BoundingSphereD(pos, _settings.range);
@@ -303,7 +319,7 @@ namespace SEEW.Blocks {
 					continue;
 
 				if(e is IMyCubeGrid) {
-					Vector3D vecTo = e.GetPosition() - pos;
+					Vector3D vecTo = e.WorldAABB.Center - pos;
 
 					contacts.Add(new RemoteContact() {
 						entId = e.EntityId,
@@ -541,6 +557,8 @@ namespace SEEW.Blocks {
 							oldTrack.ent = MyAPIGateway.Entities.GetEntityById(c.entId);
 							if(oldTrack.ent != null) {
 								oldTrack.ent.OnClose += TrackedEntityUnloaded;
+								if (oldTrack.marker != null)
+									oldTrack.ent.Hierarchy.AddChild(oldTrack.marker);
 								_logger.debugLog($"Entity associated with Track {oldTrack.trackId} is now available on the client", "ProcessAcquiredContacts");
 							}
 						}
@@ -554,7 +572,7 @@ namespace SEEW.Blocks {
 						Track newTrack = new Track() {
 							lost = false,
 							ent = MyAPIGateway.Entities.GetEntityById(c.entId),
-							gps = null,
+							marker = null,
 							trackId = id,
 							position = c.pos,
 							xsec = c.xsec
@@ -577,9 +595,8 @@ namespace SEEW.Blocks {
 					if (t.Value.lost) {
 						l++;
 
-						// Remove the GPS 
-						if(t.Value.gps != null)
-							MyAPIGateway.Session.GPS.RemoveLocalGps(t.Value.gps);
+						// Remove the marker
+						ClearTrackMarker(t.Value);
 
 						// Add to prune list 
 						remove.Add(t.Key);
@@ -661,24 +678,37 @@ namespace SEEW.Blocks {
 		/// </summary>
 		/// <param name="t"></param>
 		private void AddUpdateTrackMarker(Track t) {
-
 			string title = $"~Track {t.trackId} ({(int)t.xsec}m²)~";
 
-			if (t.gps == null) {
-				//_logger.debugLog("Creating new GPS marker", "AddUpdateTrackMarker");
-				t.gps = MyAPIGateway.Session.GPS.Create(
-							title, "Radar Track",
-							t.position, true, true);
-
-				MyAPIGateway.Session.GPS.AddLocalGps(t.gps);
-
-				/*MyVisualScriptLogicProvider.SetGPSColor(
-					t.gps.Name,
-					Constants.Color_RadarContact);*/
+			if (t.marker == null) {
+				// If the entity is not null, attach the marker directly to it
+				// Otherwise create one in space and we'll update it manually
+				if (t.ent != null) {
+					t.marker = new MyAreaMarker(
+						new MyPositionAndOrientation(t.ent.LocalAABB.Center, Vector3.Forward, Vector3.Up), 
+						new MyAreaMarkerDefinition() {
+							DisplayNameEnum = MyStringId.GetOrCompute(title),	
+						});
+					t.marker.AddHudMarker();
+					t.ent.Hierarchy.AddChild(t.marker);
+				} else {
+					t.marker = new MyAreaMarker(
+						new MyPositionAndOrientation(MatrixD.CreateFromTransformScale(
+							Quaternion.Identity,
+							t.position,
+							new Vector3D(1,1,1))),
+						new MyAreaMarkerDefinition() {
+							DisplayNameEnum = MyStringId.GetOrCompute(title),
+						});
+					t.marker.AddHudMarker();
+				}
+				
 			} else {
 				//_logger.debugLog("Updating existing GPS marker", "AddUpdateTrackMarker");
-				t.gps.Coords = t.position;
-				t.gps.Name = title;
+				if (t.ent == null) {
+					t.marker.PositionComp.SetPosition(t.position);
+					t.marker.DisplayName = title;
+				}
 			}
 		}
 
@@ -687,9 +717,12 @@ namespace SEEW.Blocks {
 		/// </summary>
 		/// <param name="t"></param>
 		private void ClearTrackMarker(Track t) {
-			if (t.gps != null) {
-				MyAPIGateway.Session.GPS.RemoveLocalGps(t.gps);
-				t.gps = null;
+			if (t.marker != null) {
+				//MyAPIGateway.Session.GPS.RemoveLocalGps(t.marker);
+				if (t.ent != null)
+					t.ent.Hierarchy.RemoveChild(t.marker);
+				t.marker.Close();
+				t.marker = null;
 			}
 		}
 
