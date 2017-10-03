@@ -22,6 +22,7 @@ using VRage.Game;
 using VRage.Library.Utils;
 using VRage.Utils;
 using VRage;
+using SEEW.Core;
 
 namespace SEEW.Blocks {
 
@@ -109,10 +110,12 @@ namespace SEEW.Blocks {
 			_grid = (Entity as IMyCubeBlock).CubeGrid;
 			_logger = new Logger(Entity.EntityId.ToString(), "RadarController");
 			
-			this.NeedsUpdate |= VRage.ModAPI.MyEntityUpdateEnum.EACH_100TH_FRAME;
+			//this.NeedsUpdate |= VRage.ModAPI.MyEntityUpdateEnum.EACH_100TH_FRAME;
 			this.NeedsUpdate |= MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
 			_grid.OnBlockAdded += BlockAdded;
 			_grid.OnBlockRemoved += BlockRemoved;
+
+			EWRegistry<RadarController>.Instance.Register(_grid.EntityId, this);
 		}
 
 		/// <summary>
@@ -303,7 +306,7 @@ namespace SEEW.Blocks {
 		/// streamed to the client.
 		/// </summary>
 		private void DoAcquisitionSweep() {
-			_logger.debugLog("Running acquisition sweep", "DoAcquisitionSweep");
+			//_logger.debugLog("Running acquisition sweep", "DoAcquisitionSweep");
 
 			Vector3D pos = _grid.WorldAABB.Center;
 
@@ -332,7 +335,7 @@ namespace SEEW.Blocks {
 			// Send the contact list, even if it is blank.  This is how the
 			// client will know when distant contacts have gone out of range
 			// or disappeared.
-			_logger.debugLog($"List<RemoteContact> -> Clients with {contacts.Count} entities", "DoAcquisitionSweep");
+			//_logger.debugLog($"List<RemoteContact> -> Clients with {contacts.Count} entities", "DoAcquisitionSweep");
 			Message<long, List<RemoteContact>> msg
 				= new Message<long, List<RemoteContact>>(Entity.EntityId, contacts);
 			MyAPIGateway.Multiplayer.SendMessageToOthers(
@@ -417,7 +420,7 @@ namespace SEEW.Blocks {
 		/// </summary>
 		/// <returns></returns>
 		public List<Radar> GetAvailableRadars() {
-			_logger.log($"There are {_allRadars.Count} radars on this grid", "GetAvailableRadars");
+			//_logger.log($"There are {_allRadars.Count} radars on this grid", "GetAvailableRadars");
 			return _allRadars.Where((radar) => {
 				RadarBlock r = radar.radarBlock;
 				return !r.isAssigned;
