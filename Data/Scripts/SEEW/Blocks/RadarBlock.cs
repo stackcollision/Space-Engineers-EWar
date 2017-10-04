@@ -21,7 +21,7 @@ namespace SEEW.Blocks {
 	/// Attached to all radar blocks.  Contains some simple data
 	/// about their use.
 	/// </summary>
-	[MyEntityComponentDescriptor(typeof(MyObjectBuilder_UpgradeModule), true, new string[] { "EWRadarSearchPhased", "EWRadarSearchRotating" })]
+	[MyEntityComponentDescriptor(typeof(MyObjectBuilder_UpgradeModule), false, new string[] { "EWRadarSearchPhased", "EWRadarSearchRotating" })]
     public class RadarBlock : MyGameLogicComponent
     {
 

@@ -147,7 +147,7 @@ namespace SEEW.Core {
 			rangeSlider.Setter = (block, value) => {
 				RadarController controller = block.GameLogic.GetAs<RadarController>();
 				controller.SetRange((int)value);
-				SendRadarSettings(block.EntityId);
+				SendRadarSettings(new BlockAddress(block.CubeGrid.EntityId, block.EntityId));
 			};
 			rangeSlider.Writer = (block, str) => {
 				RadarController controller = block.GameLogic.GetAs<RadarController>();
@@ -168,7 +168,7 @@ namespace SEEW.Core {
 			freqSlider.Setter = (block, value) => {
 				RadarController controller = block.GameLogic.GetAs<RadarController>();
 				controller.SetFreq(value);
-				SendRadarSettings(block.EntityId);
+				SendRadarSettings(new BlockAddress(block.CubeGrid.EntityId, block.EntityId));
 			};
 			freqSlider.Writer = (block, str) => {
 				RadarController controller = block.GameLogic.GetAs<RadarController>();
@@ -292,12 +292,13 @@ namespace SEEW.Core {
 		#endregion
 
 		#region Message Handlers
-		private void SendRadarSettings(long block) {
+		private void SendRadarSettings(BlockAddress block) {
 			try {
-				RadarController controller = RadarController.GetForBlock(block);
+				RadarController controller
+					= EWRegistry<RadarController>.Instance.Get(block);
 
-				Message<long, RadarSettings> msg
-					= new Message<long, RadarSettings>(block, controller.GetRadarSettings());
+				Message<BlockAddress, RadarSettings> msg
+					= new Message<BlockAddress, RadarSettings>(block, controller.GetRadarSettings());
 
 				if (Helpers.IsServer) {
 					_logger.debugLog($"RadarSystemSettings -> Clients for block {block}", "SendRadarSettings");
@@ -318,14 +319,15 @@ namespace SEEW.Core {
 
 		private void HandleUpdateRadarSettings(byte[] data) {
 			try {
-				Message<long, RadarSettings> msg
-					= Message<long, RadarSettings>.FromXML(data);
+				Message<BlockAddress, RadarSettings> msg
+					= Message<BlockAddress, RadarSettings>.FromXML(data);
 				if (msg == null)
 					return;
 
-				_logger.debugLog($"Got radar settings update for block {msg.Key}", "HandleUpdateRadarSettings");
+				_logger.debugLog($"Got radar settings update for {msg.Key}", "HandleUpdateRadarSettings");
 
-				RadarController controller = RadarController.GetForBlock(msg.Key);
+				RadarController controller
+					= EWRegistry<RadarController>.Instance.Get(msg.Key);
 				if (controller == null)
 					return; // Controller not streamed to us
 				controller.UpdateRadarSettings(msg.Value);
@@ -340,12 +342,12 @@ namespace SEEW.Core {
 
 		private void HandleGetRadarSettings(byte[] data) {
 			try {
-				Message<long, long> msg
-					= Message<long, long>.FromXML(data);
+				Message<BlockAddress, long> msg
+					= Message<BlockAddress, long>.FromXML(data);
 				if (msg == null)
 					return;
 
-				_logger.debugLog($"Got radar settings request for block {msg.Key}", "HandleGetRadarSettings");
+				_logger.debugLog($"Got radar settings request for {msg.Key}", "HandleGetRadarSettings");
 
 				SendRadarSettings(msg.Key);
 
@@ -357,14 +359,15 @@ namespace SEEW.Core {
 
 		private void HandleAcquisitionSweep(byte[] data) {
 			try {
-				Message<long, List<RadarController.RemoteContact>> msg
-					= Message<long, List<RadarController.RemoteContact>>.FromXML(data);
+				Message<BlockAddress, List<RadarController.RemoteContact>> msg
+					= Message<BlockAddress, List<RadarController.RemoteContact>>.FromXML(data);
 				if (msg == null)
 					return;
 
-				_logger.debugLog($"Got acquired contacts for block {msg.Key}", "HandleAcquisitionSweep");
+				_logger.debugLog($"Got acquired contacts for {msg.Key}", "HandleAcquisitionSweep");
 
-				RadarController controller = RadarController.GetForBlock(msg.Key);
+				RadarController controller
+					= EWRegistry<RadarController>.Instance.Get(msg.Key);
 				if (controller == null) {
 					_logger.debugLog("Controller is null", "HandleAcquisitionSweep");
 					return;

@@ -81,6 +81,9 @@ namespace SEEW.Blocks {
 		#endregion
 
 		#region Instance Members
+		public long BlockID { get { return Entity.EntityId; } }
+		public long GridID { get { return _grid.EntityId; } }
+
 		private Logger _logger;
 		private IMyCubeGrid _grid;
 
@@ -108,14 +111,14 @@ namespace SEEW.Blocks {
 			base.Init(objectBuilder);
 
 			_grid = (Entity as IMyCubeBlock).CubeGrid;
-			_logger = new Logger(Entity.EntityId.ToString(), "RadarController");
+			_logger = new Logger(Entity.EntityId.ToString() + " @ " + _grid.EntityId.ToString(), "RadarController");
 			
 			//this.NeedsUpdate |= VRage.ModAPI.MyEntityUpdateEnum.EACH_100TH_FRAME;
 			this.NeedsUpdate |= MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
 			_grid.OnBlockAdded += BlockAdded;
 			_grid.OnBlockRemoved += BlockRemoved;
 
-			EWRegistry<RadarController>.Instance.Register(_grid.EntityId, this);
+			//EWRegistry<RadarController>.Instance.Register(GridID, BlockID, this);
 		}
 
 		/// <summary>
@@ -145,14 +148,6 @@ namespace SEEW.Blocks {
 
 			base.Close();
 		}
-
-		public static RadarController GetForBlock(long entityId) {
-			IMyEntity ent = MyAPIGateway.Entities.GetEntityById(entityId);
-			if (ent == null)
-				return null;
-
-			return ent.GameLogic.GetAs<RadarController>();
-		}
 		#endregion
 
 		#region SE Hooks - Simulation
@@ -162,8 +157,9 @@ namespace SEEW.Blocks {
 					Entity.Storage = new MyModStorageComponent();
 				LoadSavedData();
 
-				
-				if(Helpers.IsServer) {
+				EWRegistry<RadarController>.Instance.Register(GridID, BlockID, this);
+
+				if (Helpers.IsServer) {
 					// The server will do an acquisition sweep and push results
 					// to the clients
 					_remoteSweepTimer = new MyTimer(5000, DoAcquisitionSweep);
@@ -336,8 +332,10 @@ namespace SEEW.Blocks {
 			// client will know when distant contacts have gone out of range
 			// or disappeared.
 			//_logger.debugLog($"List<RemoteContact> -> Clients with {contacts.Count} entities", "DoAcquisitionSweep");
-			Message<long, List<RemoteContact>> msg
-				= new Message<long, List<RemoteContact>>(Entity.EntityId, contacts);
+			Message<BlockAddress, List<RemoteContact>> msg
+				= new Message<BlockAddress, List<RemoteContact>>(
+					new BlockAddress(this.GridID, this.BlockID), 
+					contacts);
 			MyAPIGateway.Multiplayer.SendMessageToOthers(
 				Constants.MIDAcquisitionSweep,
 				msg.ToXML());

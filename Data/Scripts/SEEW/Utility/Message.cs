@@ -36,4 +36,27 @@ namespace SEEW.Utility {
 			return ASCIIEncoding.ASCII.GetBytes(MyAPIGateway.Utilities.SerializeToXML<Message<TKey, TValue>>(this));
 		}
 	}
+
+	/// <summary>
+	/// Used for addressing a block on a grid with a message
+	/// </summary>
+	[Serializable]
+	public class BlockAddress {
+		public long grid;
+		public long block;
+
+		public BlockAddress() {
+			grid = 0;
+			block = 0;
+		}
+
+		public BlockAddress(long grid, long block) {
+			this.grid = grid;
+			this.block = block;
+		}
+
+		public override string ToString() {
+			return $"{block} @ {grid}";
+		}
+	}
 }
