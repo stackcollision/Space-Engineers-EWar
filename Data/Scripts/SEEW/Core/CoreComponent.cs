@@ -85,6 +85,21 @@ namespace SEEW.Core {
 				}
 			}
 		}
+
+		protected override void UnloadData() {
+			if(_initialized) {
+				MyAPIGateway.Multiplayer.UnregisterMessageHandler(Constants.MIDUpdateRadarSettings, HandleUpdateRadarSettings);
+				MyAPIGateway.Multiplayer.UnregisterMessageHandler(Constants.MIDGetRadarSettingsServer, HandleGetRadarSettings);
+
+				MyAPIGateway.Multiplayer.UnregisterMessageHandler(Constants.MIDAcquisitionSweep, HandleAcquisitionSweep);
+
+				MyAPIGateway.Multiplayer.UnregisterMessageHandler(Constants.MIDUpdateRadarSettings, HandleUpdateRadarSettings);
+				MyAPIGateway.Multiplayer.UnregisterMessageHandler(Constants.MIDAcquisitionSweep, HandleAcquisitionSweep);
+
+			}
+
+			base.UnloadData();
+		}
 		#endregion
 
 		#region Custom Controls
