@@ -701,6 +701,9 @@ namespace SEEW.Blocks {
 							DisplayNameEnum = MyStringId.GetOrCompute(title),
 						});
 					t.marker.AddHudMarker();
+					t.marker.Save = false;
+					t.marker.SyncFlag = false;
+					t.marker.IsPreview = true;
 				}
 				
 			} else {
