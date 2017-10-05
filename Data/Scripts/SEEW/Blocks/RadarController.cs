@@ -113,8 +113,10 @@ namespace SEEW.Blocks {
 			_grid = (Entity as IMyCubeBlock).CubeGrid;
 			_logger = new Logger(Entity.EntityId.ToString() + " @ " + _grid.EntityId.ToString(), "RadarController");
 			
-			//this.NeedsUpdate |= VRage.ModAPI.MyEntityUpdateEnum.EACH_100TH_FRAME;
 			this.NeedsUpdate |= MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
+			if (!Helpers.IsServer || !Helpers.IsDedicated)
+				this.NeedsUpdate |= MyEntityUpdateEnum.EACH_FRAME;
+
 			_grid.OnBlockAdded += BlockAdded;
 			_grid.OnBlockRemoved += BlockRemoved;
 
@@ -151,6 +153,9 @@ namespace SEEW.Blocks {
 		#endregion
 
 		#region SE Hooks - Simulation
+		/// <summary>
+		/// Only used for the first frame to initialize the block
+		/// </summary>
 		public override void UpdateOnceBeforeFrame() {
 			if (!_initialized) {
 				if (Entity.Storage == null)
@@ -188,6 +193,24 @@ namespace SEEW.Blocks {
 			}
 		}
 
+		/// <summary>
+		/// CLIENT ONLY
+		/// 
+		/// Before every frame go through the track list and move the marker
+		/// to where the grid is if the entity is not null on the client.
+		/// Have to do this because attaching the marker to the entity will
+		/// cause an exception on save.
+		/// </summary>
+		public override void UpdateBeforeSimulation() {
+			foreach(Track track in _allTracks.Values) {
+				if (track.ent == null || track.marker == null)
+					continue;
+
+				track.marker.PositionComp.SetPosition(
+					track.ent.WorldAABB.Center
+					);
+			}
+		}
 		#endregion
 
 		#region SE Hooks - Block Added
@@ -352,9 +375,7 @@ namespace SEEW.Blocks {
 			Vector3D myPos = _grid.WorldAABB.Center;
 
 			// Go through all current tracks and update their makers
-			foreach(KeyValuePair<long, Track> t in _allTracks) { 
-
-				Track track = t.Value;
+			foreach(Track track in _allTracks.Values) { 
 
 				//_logger.debugLog($"For Track {track.trackId}", "DoTrackingSweep");
 
@@ -558,8 +579,6 @@ namespace SEEW.Blocks {
 							oldTrack.ent = MyAPIGateway.Entities.GetEntityById(c.entId);
 							if(oldTrack.ent != null) {
 								oldTrack.ent.OnClose += TrackedEntityUnloaded;
-								if (oldTrack.marker != null)
-									oldTrack.ent.Hierarchy.AddChild(oldTrack.marker);
 								_logger.debugLog($"Entity associated with Track {oldTrack.trackId} is now available on the client", "ProcessAcquiredContacts");
 							}
 						}
@@ -691,7 +710,6 @@ namespace SEEW.Blocks {
 							DisplayNameEnum = MyStringId.GetOrCompute(title),	
 						});
 					t.marker.AddHudMarker();
-					t.ent.Hierarchy.AddChild(t.marker);
 				} else {
 					t.marker = new MyAreaMarker(
 						new MyPositionAndOrientation(MatrixD.CreateFromTransformScale(
@@ -723,8 +741,6 @@ namespace SEEW.Blocks {
 		private void ClearTrackMarker(Track t) {
 			if (t.marker != null) {
 				//MyAPIGateway.Session.GPS.RemoveLocalGps(t.marker);
-				if (t.ent != null)
-					t.ent.Hierarchy.RemoveChild(t.marker);
 				t.marker.Close();
 				t.marker = null;
 			}
